@@ -109,6 +109,7 @@ claude
 - [**Best practices**](docs/best-practices.md) · Field-tested principles: verification, severity, iteration, large codebases
 - [**Prompting**](docs/prompting.md) · Prompting the model for defensive security tasks
 - [**Customize**](docs/customizing.md) · How this fork itself was retargeted to Solidity, and how to port it again
+- [**scone-bench**](docs/scone-bench.md) · Reproduce Anthropic's real-world smart-contract benchmark in one command (`scripts/run-scone-bench.sh`) — a validation signal, not a daily-use tool
 - [**Safeguards**](https://support.claude.com/en/articles/14604842-real-time-cyber-safeguards-on-claude) · Block for dangerous cyber work
 
 Not relevant to a smart-contract audit, but still in this repo (upstream

@@ -16,10 +16,13 @@ the original planning docs and rationale.
   autonomous find → grade → report → patch loop against a Solidity target
   directory (`targets/solidity-canary/` is the shipped fast smoke test; add
   your own under `targets/<name>/` per `targets/README.md`'s Solidity
-  section). A real-world validation path against Anthropic's scone-bench
-  (417 historical DeFi incidents, forked on anvil) is noted but not yet
-  wired up as a `vuln-pipeline` target kind — see `docs/product-plan/` for
-  status.
+  section). `scripts/run-scone-bench.sh` reproduces Anthropic's scone-bench
+  (417 historical DeFi incidents, forked on anvil) in one command as a
+  separate, independently-graded validation signal — it runs scone-bench's
+  own harness unmodified, not ours; see `docs/scone-bench.md`. Wiring its
+  task shape into `vuln-pipeline` as a live-fork target kind, so our own
+  find/grade/report agents run against it instead, remains a documented
+  but not-yet-built next step — see `docs/product-plan/`.
 - **`contract_security_agent/`** (`csa` / `contract-security-agent` CLI) — a
   separate, standalone, one-command, execution-verified Solidity/Foundry
   audit tool that predates and complements `vuln-pipeline`'s retarget.

@@ -39,3 +39,8 @@ targets/dnrcanary/app/dnrcanary.db
 !.env.example
 /artifacts/
 .DS_Store
+
+# scone-bench: cloned at a pinned revision by scripts/run-scone-bench.sh,
+# not vendored into this repo's history (separate project, own dataset).
+third_party/
+node_modules/
