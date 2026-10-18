@@ -45,7 +45,7 @@ def _crash() -> CrashArtifact:
 
 
 def _run_vp(tmp_path, monkeypatch, crash, find_error):
-    target = TargetConfig.load(REPO / "targets" / "canary")
+    target = TargetConfig.load(REPO / "targets" / "solidity-canary")
     find_result = AgentResult(messages=[_assistant("done")], error=find_error)
     graded: list[CrashArtifact] = []
 

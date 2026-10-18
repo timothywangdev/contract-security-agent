@@ -14,13 +14,13 @@ from typing import Any
 
 @dataclass(frozen=True)
 class CrashArtifact:
-    """A crash the find-agent claims to have produced. Not yet verified."""
-    poc_path: str              # path inside the find-container, e.g. /tmp/poc.bin
-    poc_bytes: bytes           # PoC file contents — bytes, inputs are often binary
-    reproduction_command: str  # exact command, e.g. "/work/entry /tmp/poc.bin"
-    crash_type: str            # agent's classification, e.g. "heap-buffer-overflow"
-    crash_output: str          # ASAN trace / stderr, truncated to 10K chars
-    exit_code: int             # e.g. 134 (SIGABRT from ASAN)
+    """A finding the find-agent claims to have produced. Not yet verified."""
+    poc_path: str              # path inside the find-container, e.g. test/audit/Exploit_Reentrancy.t.sol
+    poc_bytes: bytes           # PoC file contents — a Foundry exploit/invariant test, UTF-8 Solidity source
+    reproduction_command: str  # exact command, e.g. "forge test --match-path test/audit/Exploit_Reentrancy.t.sol -vvv"
+    crash_type: str            # agent's classification, e.g. "Reentrancy"
+    crash_output: str          # forge test --json / Halmos JSON output, truncated to 10K chars
+    exit_code: int             # forge/Halmos process exit code (e.g. 1 on a failing exploit test)
     dup_check: str | None = None  # agent's reasoning that this isn't a known dup
 
     def to_dict(self) -> dict[str, Any]:
@@ -65,7 +65,7 @@ class GraderVerdict:
 @dataclass
 class PatchVerdict:
     """T0-T3 ladder result for a candidate patch. Every gating tier is an
-    executable oracle (compiler/ASAN/tests); T3 is advisory-only."""
+    executable oracle (forge build/test, re-attack); T3 is advisory-only."""
     t0_builds: bool
     t1_poc_stops: bool
     t2_tests_pass: bool | None     # None = target has no test suite
@@ -122,14 +122,14 @@ class JudgeVerdict:
 
 @dataclass
 class ReportVerdict:
-    """The report-agent's exploitability analysis of a verified crash."""
-    section_scores: dict[str, int]  # primitive, reachability, heap_layout, escalation_path, constraints → 0/1/2
+    """The report-agent's exploitability analysis of a verified finding."""
+    section_scores: dict[str, int]  # per-section 0/1/2 scores; section names are domain-specific (see report.py's _SECTIONS)
     rubric_score: int               # sum of section scores, 0..10
     escalation_bonus: int           # 0..4 for escalation_attempt depth
     total_score: float              # (rubric + bonus) / 14
     severity_rating: str            # agent's CRITICAL/HIGH/MEDIUM/LOW/NOT-A-BUG/NOT_STATED
     novelty_status: str             # FIXED/UNFIXED/UNKNOWN/NOT_CHECKED
-    reachability_verdict: str       # REACHABLE/HARNESS_ONLY/UNCLEAR
+    reachability_verdict: str       # PRIVILEGED_ONLY/HARNESS_ONLY/REACHABLE/UNCLEAR
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

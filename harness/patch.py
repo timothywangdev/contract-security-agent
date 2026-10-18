@@ -52,10 +52,19 @@ async def run_patch(
     """
     if not target.build_command:
         raise ValueError(f"target {target.name!r} has no build_command")
-    if crash.poc_path not in crash.reproduction_command:
+    if target.binary_path:
+        if crash.poc_path not in crash.reproduction_command:
+            raise ValueError(
+                f"poc_path {crash.poc_path!r} not in reproduction_command "
+                f"{crash.reproduction_command!r}"
+            )
+    elif not crash.poc_path.startswith(target.source_root.rstrip("/") + "/"):
+        # Source-based target (e.g. Solidity): poc_path is an absolute
+        # in-tree path; reproduction_command references it relative to
+        # source_root rather than verbatim — see grade.py for the same split.
         raise ValueError(
-            f"poc_path {crash.poc_path!r} not in reproduction_command "
-            f"{crash.reproduction_command!r}"
+            f"poc_path {crash.poc_path!r} is not inside source_root "
+            f"{target.source_root!r}"
         )
 
     out_dir = Path(out_dir)
@@ -75,13 +84,23 @@ async def run_patch(
         await asyncio.to_thread(
             docker_ops.write_file, container, "/tmp/poc.bin", crash.poc_bytes
         )
-        adapted_cmd = crash.reproduction_command.replace(crash.poc_path, "/tmp/poc.bin")
-        # Ensure source_root is a git repo with a baseline commit so the
-        # agent's `git diff` is deterministic. Gitignore the built binary so
-        # the diff is source-only (otherwise the rebuilt binary lands in the
-        # diff and grade's `git apply` rejects it).
-        binary_rel = os.path.relpath(target.binary_path, target.source_root)
-        ignore = f"printf '%s\\n' '{binary_rel}' '*.o' >> .gitignore && "
+        if target.binary_path:
+            adapted_cmd = crash.reproduction_command.replace(crash.poc_path, "/tmp/poc.bin")
+            # Ensure source_root is a git repo with a baseline commit so the
+            # agent's `git diff` is deterministic. Gitignore the built binary
+            # so the diff is source-only (otherwise the rebuilt binary lands
+            # in the diff and grade's `git apply` rejects it).
+            binary_rel = os.path.relpath(target.binary_path, target.source_root)
+            ignore = f"printf '%s\\n' '{binary_rel}' '*.o' >> .gitignore && "
+        else:
+            # Source-based target: no single binary to ignore — ignore the
+            # build tool's own output dirs instead (Foundry's out/ and
+            # cache/) so a rebuild doesn't pollute the diff. The PoC is
+            # source code, not a data file, so write it to its own in-tree
+            # path (same split as grade.py) and leave the command unchanged.
+            await asyncio.to_thread(docker_ops.write_file, container, crash.poc_path, crash.poc_bytes)
+            adapted_cmd = crash.reproduction_command
+            ignore = "printf '%s\\n' 'out/' 'cache/' >> .gitignore && "
         await asyncio.to_thread(
             docker_ops.exec_sh,
             container,

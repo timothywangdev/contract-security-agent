@@ -39,21 +39,48 @@ async def run_grade(
     workspace_dir: host-side results dir where we also persist poc.bin so
     it survives the container teardown.
     """
-    # Path-substitution sanity: replace() below no-ops silently if poc_path
-    # isn't in reproduction_command. That's a find-agent output inconsistency
-    # — reject it here rather than hand the grader an unadapted command.
-    if crash.poc_path not in crash.reproduction_command:
-        raise ValueError(
-            f"poc_path {crash.poc_path!r} not found in reproduction_command "
-            f"{crash.reproduction_command!r} — find-agent output is inconsistent"
-        )
+    if target.binary_path:
+        # Path-substitution sanity: replace() below no-ops silently if poc_path
+        # isn't in reproduction_command. That's a find-agent output
+        # inconsistency — reject it here rather than hand the grader an
+        # unadapted command.
+        if crash.poc_path not in crash.reproduction_command:
+            raise ValueError(
+                f"poc_path {crash.poc_path!r} not found in reproduction_command "
+                f"{crash.reproduction_command!r} — find-agent output is inconsistent"
+            )
+    else:
+        # Source-based target (e.g. Solidity): poc_path is an absolute
+        # in-tree path (source_root/test/audit/...); reproduction_command
+        # references it by its path relative to source_root (run with that
+        # as cwd), so it needn't appear verbatim in the command string.
+        # Still reject anything that would land outside the project tree.
+        if not crash.poc_path.startswith(target.source_root.rstrip("/") + "/"):
+            raise ValueError(
+                f"poc_path {crash.poc_path!r} is not inside source_root "
+                f"{target.source_root!r} — find-agent output is inconsistent"
+            )
 
     # Fresh agent container from the SAME image — find-agent never touched it.
     with sandbox.agent_container(target.image_tag, container_name, agent_env) as container:
-        # Only the PoC bytes cross the boundary. Substitute the path: the
-        # find-agent saved to some arbitrary path; we write to a fixed one.
+        # Only the PoC bytes cross the boundary.
         docker_ops.write_file(container, "/tmp/poc.bin", crash.poc_bytes)
-        adapted_cmd = crash.reproduction_command.replace(crash.poc_path, "/tmp/poc.bin")
+        if target.binary_path:
+            # Binary target: the PoC is a single input file consumed as a
+            # command-line argument. Substitute the path: the find-agent
+            # saved to some arbitrary path; we write to a fixed one.
+            adapted_cmd = crash.reproduction_command.replace(crash.poc_path, "/tmp/poc.bin")
+        else:
+            # Source-based target (e.g. Solidity): the PoC IS source code
+            # (a Foundry/Halmos test) that the build tool must find at its
+            # original in-tree path to compile and run — substituting a
+            # /tmp path into the command would point --match-path at
+            # nothing. Write the bytes to BOTH locations: the original
+            # in-tree path (so the unmodified reproduction_command works)
+            # and /tmp/poc.bin (kept for grader prompts that reference it
+            # as a sanity copy). The command is not rewritten.
+            docker_ops.write_file(container, crash.poc_path, crash.poc_bytes)
+            adapted_cmd = crash.reproduction_command
 
         os.makedirs(workspace_dir, exist_ok=True)
         workspace_poc = os.path.join(workspace_dir, "poc.bin")

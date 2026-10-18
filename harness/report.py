@@ -1,12 +1,12 @@
 # Copyright 2026 Anthropic PBC
 # SPDX-License-Identifier: Apache-2.0
-"""Report stage: exploitability analysis of a verified crash.
+"""Report stage: impact analysis of a verified Solidity finding.
 
 Third agent phase after find+grade. Fresh container from the same image; only
-the PoC bytes cross. Agent re-runs the PoC, reads source, produces a structured
-6-section report. A separate grader-agent scores the five analysis sections
-semantically; novelty is a host-side-injected factual lookup (or NOT_CHECKED
-if `--novelty` is off).
+the PoC bytes (the failing Foundry test) cross. Agent re-runs the test, reads
+the contracts, produces a structured 6-section report. A separate grader-agent
+scores the five analysis sections semantically; novelty is a host-side-injected
+factual lookup (or NOT_CHECKED if `--novelty` is off).
 
 Budget: 200 turns — bounded analysis, not open search.
 """
@@ -26,11 +26,12 @@ from .prompts.report_grader_prompt import build_report_grader_prompt
 REPORT_MAX_TURNS = 200
 GRADER_MAX_TURNS = 10
 
-_SECTIONS = ("primitive", "reachability", "heap_layout",
+# Must match the tags report_prompt.py asks for and report_grader_prompt.py scores.
+_SECTIONS = ("primitive", "reachability", "state_impact",
              "escalation_path", "constraints")
 # Longest-first so UNFIXED doesn't match FIXED, NOT-A-BUG doesn't match LOW, etc.
 _SEVERITY_TOKENS = ("NOT-A-BUG", "NOT_STATED", "CRITICAL", "MEDIUM", "HIGH", "LOW")
-_REACH_TOKENS = ("HARNESS_ONLY", "REACHABLE", "UNCLEAR")
+_REACH_TOKENS = ("PRIVILEGED_ONLY", "HARNESS_ONLY", "REACHABLE", "UNCLEAR")
 _NOVELTY_TOKENS = ("NOT_CHECKED", "NOT_STATED", "UNFIXED", "UNKNOWN", "FIXED")
 
 
@@ -56,15 +57,29 @@ async def run_report(
     upstream_log: pre-computed `git log commit..HEAD -- file` output, or None
     to disable the novelty section entirely.
     """
-    if crash.poc_path not in crash.reproduction_command:
+    if target.binary_path:
+        if crash.poc_path not in crash.reproduction_command:
+            raise ValueError(
+                f"poc_path {crash.poc_path!r} not in reproduction_command "
+                f"{crash.reproduction_command!r}"
+            )
+    elif not crash.poc_path.startswith(target.source_root.rstrip("/") + "/"):
+        # Source-based target: same split as grade.py.
         raise ValueError(
-            f"poc_path {crash.poc_path!r} not in reproduction_command "
-            f"{crash.reproduction_command!r}"
+            f"poc_path {crash.poc_path!r} is not inside source_root "
+            f"{target.source_root!r}"
         )
 
     with sandbox.agent_container(target.image_tag, container_name, agent_env) as container:
         docker_ops.write_file(container, "/tmp/poc.bin", crash.poc_bytes)
-        adapted_cmd = crash.reproduction_command.replace(crash.poc_path, "/tmp/poc.bin")
+        if target.binary_path:
+            adapted_cmd = crash.reproduction_command.replace(crash.poc_path, "/tmp/poc.bin")
+            poc_location = "/tmp/poc.bin"
+        else:
+            # The PoC is a Foundry test the build tool must find in-tree.
+            docker_ops.write_file(container, crash.poc_path, crash.poc_bytes)
+            adapted_cmd = crash.reproduction_command
+            poc_location = crash.poc_path
 
         os.makedirs(workspace_dir, exist_ok=True)
         with open(os.path.join(workspace_dir, "poc.bin"), "wb") as f:
@@ -76,6 +91,7 @@ async def run_report(
             source_root=target.source_root,
             binary_path=target.binary_path,
             reproduction_command=adapted_cmd,
+            poc_path=poc_location,
             crash_output=crash.crash_output,
             attack_surface=target.attack_surface,
             upstream_log=upstream_log,

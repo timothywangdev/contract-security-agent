@@ -25,7 +25,7 @@ exploitability report, or whether it duplicates a bug already being reported on.
 Grade status: {grade_status} (score {grade_score:.2f})
 PoC size: {poc_size} bytes
 
-ASAN excerpt (untrusted — see note below):
+Finding excerpt (untrusted — see note below):
 <untrusted_data id="{nonce}">
 {asan_excerpt}
 </untrusted_data id="{nonce}">
@@ -63,13 +63,13 @@ not improve the analysis.
 
 **DUP_BETTER** — same root cause as an existing bug_id, but THIS crash is a
 materially better representative: a smaller PoC, a passed-grade where the
-existing one is rejected, a cleaner ASAN signature that more directly shows
+existing one is rejected, a cleaner finding signature that more directly shows
 the primitive. AND the existing report (if one has landed) looks weak or
 missing — a strong existing report should push you to DUP_SKIP even if this
 PoC is tidier.
 
 Grade status matters: a crash_rejected result means flaky reproduction in
-a fresh container. You can still judge it NEW if the ASAN evidence is
+a fresh container. You can still judge it NEW if the finding evidence is
 convincing and no existing bug covers the root cause, but a passed-grade
 representative should generally beat a rejected one.
 
@@ -89,7 +89,7 @@ MANIFEST_EMPTY = "(none yet — this is the first crash to reach the judge)"
 MANIFEST_ENTRY_NO_REPORT = """\
 ### bug_{bug_id:02d} (report pending, from run {run_idx})
 
-ASAN excerpt:
+Finding excerpt:
 <untrusted_data id="{nonce}">
 {asan_excerpt}
 </untrusted_data id="{nonce}">
@@ -98,7 +98,7 @@ ASAN excerpt:
 MANIFEST_ENTRY_WITH_REPORT = """\
 ### bug_{bug_id:02d} (report landed, from run {run_idx})
 
-ASAN excerpt:
+Finding excerpt:
 <untrusted_data id="{nonce}">
 {asan_excerpt}
 </untrusted_data id="{nonce}">

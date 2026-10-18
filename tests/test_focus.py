@@ -76,11 +76,11 @@ def test_accept_dos_section_off_by_default():
 
 def test_accept_dos_section_renders_when_enabled():
     p = build_find_prompt("url", "abc", "/src", "/bin", accept_dos=True)
-    assert "## Benchmark mode — DoS-class crashes are in scope" in p
-    assert "allocation-size-too-big" in p
-    assert "allocator_may_return_null=1" in p
+    assert "## Benchmark mode — DoS-class findings are in scope" in p
+    assert "Permanent or attacker-controlled lockout" in p
+    assert "test_Exploit_DoS_" in p
     # Comes after the quality tiers — it overrides them
-    tiers_pos = p.index("## Crash Quality Tiers")
+    tiers_pos = p.index("## Finding Quality Tiers")
     dos_pos = p.index("## Benchmark mode")
     output_pos = p.index("## Output Format")
     assert tiers_pos < dos_pos < output_pos

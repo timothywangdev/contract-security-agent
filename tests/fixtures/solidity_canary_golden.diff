@@ -1,0 +1,29 @@
+diff --git a/src/ReentrancyVault.sol b/src/ReentrancyVault.sol
+index 14e06d6..cb628db 100644
+--- a/src/ReentrancyVault.sol
++++ b/src/ReentrancyVault.sol
+@@ -1,9 +1,9 @@
+ // SPDX-License-Identifier: MIT
+ pragma solidity 0.8.26;
+ 
+-/// Bug: external call happens before the credit is debited, and the debit is
+-/// `unchecked` — a reentrant `withdraw` call drains more than the caller
+-/// deposited.
++/// Fixed: credit is debited BEFORE the external call (checks-effects-
++/// interactions), so a reentrant `withdraw` call sees an already-updated
++/// balance and can never drain more than the caller deposited.
+ contract ReentrancyVault {
+     mapping(address => uint256) public credits;
+ 
+@@ -13,10 +13,8 @@ contract ReentrancyVault {
+ 
+     function withdraw(uint256 amount) external {
+         require(credits[msg.sender] >= amount, "insufficient credit");
++        credits[msg.sender] -= amount;
+         (bool sent,) = msg.sender.call{value: amount}("");
+         require(sent, "transfer failed");
+-        unchecked {
+-            credits[msg.sender] -= amount;
+-        }
+     }
+ }

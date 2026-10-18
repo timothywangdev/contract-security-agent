@@ -24,8 +24,8 @@ class TargetConfig:
     image_tag: str
     github_url: str
     commit: str
-    binary_path: str      # path inside the built container
     source_root: str      # path inside the built container
+    binary_path: str | None = None  # path inside the built container; None for targets with no single binary (e.g. Solidity/Foundry)
     focus_areas: list[str] = field(default_factory=list)
     known_bugs: list[str] = field(default_factory=list)
     attack_surface: str | None = None
@@ -59,8 +59,8 @@ class TargetConfig:
             image_tag=cfg["image_tag"],
             github_url=cfg["github_url"],
             commit=cfg["commit"],
-            binary_path=cfg["binary_path"],
             source_root=cfg["source_root"],
+            binary_path=cfg.get("binary_path"),
             focus_areas=cfg.get("focus_areas") or [],
             known_bugs=cfg.get("known_bugs") or [],
             attack_surface=cfg.get("attack_surface"),

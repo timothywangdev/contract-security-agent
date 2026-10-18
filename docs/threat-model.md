@@ -52,6 +52,6 @@ context when it's present in the target directory; `vuln-pipeline recon`
 turns it into `focus_areas` for the autonomous pipeline. See
 [pipeline.md](pipeline.md).
 
-→ Deeper: [example output](../targets/canary/THREAT_MODEL.md) ·
+→ Deeper: [example output](../targets/solidity-canary/README.md) ·
 [skill source](../.claude/skills/threat-model/SKILL.md) ·
 [output schema](../.claude/skills/threat-model/schema.md)

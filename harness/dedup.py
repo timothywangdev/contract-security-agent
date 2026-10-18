@@ -6,8 +6,9 @@
   vuln-pipeline dedup results/<target>/                # all batches
 
 Walks result.json files under the given root and groups crashes by
-(crash_type, top ASAN frame). Includes both crash_found and crash_rejected
-results — a rejected crash is still signal.
+(crash_type, top finding frame — a "suite::test" identifier for Solidity
+findings). Includes both crash_found and crash_rejected results — a rejected
+crash is still signal.
 
 This is a summary artifact, not a phase gate. In streaming mode the judge
 agent decides which crashes get reports; this subcommand just answers "these
@@ -20,13 +21,16 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from .asan import top_frame, crash_reason
+from .finding_parser import top_frame, crash_reason
 
 
 NO_FRAME = "<no-frame>"
 
 
 def _signature(crash: dict) -> tuple[str, str]:
+    # frame is now a "<suite_path>::<test_name>" string (finding_parser.py)
+    # rather than a C stack frame, but it's used here only as an opaque
+    # grouping key — the tuple shape and grouping logic are unchanged.
     reason = crash.get("reason") or crash_reason(crash.get("crash_output") or "")
     crash_type = reason["crash_type"] or crash.get("crash_type") or "unknown"
     frame = top_frame(crash.get("crash_output") or "")

@@ -36,12 +36,12 @@ def test_parse_token():
 GRADER_OUTPUT = """\
 <score_primitive>2</score_primitive>
 <score_reachability>2</score_reachability>
-<score_heap_layout>1</score_heap_layout>
+<score_state_impact>1</score_state_impact>
 <score_escalation_path>2</score_escalation_path>
 <score_constraints>1</score_constraints>
 <escalation_bonus>2</escalation_bonus>
-<severity>CRITICAL — WRITE primitive, reachable, pointer control demonstrated</severity>
-<reachability>REACHABLE — traced from RFCOMM socket through public API</reachability>
+<severity>CRITICAL — unprivileged reentrancy drains other depositors' ETH</severity>
+<reachability>REACHABLE — any contract can call Vault.withdraw()</reachability>
 <novelty>UNFIXED — no upstream commits touched the crashing file</novelty>
 """
 
@@ -49,7 +49,7 @@ GRADER_OUTPUT = """\
 def test_parse_grader_full():
     v = _parse_grader(GRADER_OUTPUT, novelty_checked=True)
     assert v.section_scores == {
-        "primitive": 2, "reachability": 2, "heap_layout": 1,
+        "primitive": 2, "reachability": 2, "state_impact": 1,
         "escalation_path": 2, "constraints": 1,
     }
     assert v.rubric_score == 8
@@ -65,6 +65,23 @@ def test_parse_grader_novelty_off():
     assert v.novelty_status == "NOT_CHECKED"
 
 
+def test_parse_grader_privileged_only_not_matched_as_reachable():
+    v = _parse_grader("<reachability>PRIVILEGED_ONLY</reachability>", novelty_checked=False)
+    assert v.reachability_verdict == "PRIVILEGED_ONLY"
+
+
+def test_grader_prompt_scores_exactly_report_sections():
+    import re
+    from harness.report import _SECTIONS
+    from harness.prompts.report_grader_prompt import REPORT_GRADER_PROMPT_TEMPLATE
+    from harness.prompts.report_prompt import REPORT_PROMPT_TEMPLATE
+    scored = tuple(re.findall(r"<score_(\w+)>", REPORT_GRADER_PROMPT_TEMPLATE))
+    assert scored == _SECTIONS
+    for s in _SECTIONS:
+        assert f"<{s}>" in REPORT_PROMPT_TEMPLATE
+    assert "heap_layout" not in REPORT_PROMPT_TEMPLATE + REPORT_GRADER_PROMPT_TEMPLATE
+
+
 def test_parse_grader_empty():
     v = _parse_grader("", novelty_checked=False)
     assert v.rubric_score == 0
@@ -76,8 +93,13 @@ def test_parse_grader_empty():
 # ── crash_file_from_frame ────────────────────────────────────────────────────
 
 def test_crash_file_from_frame():
-    assert crash_file_from_frame("stbi__out_gif_code /work/stb_image.h:6668") == "/work/stb_image.h"
-    assert crash_file_from_frame("decode_chunk /src/a/b/decoder.c:4521") == "/src/a/b/decoder.c"
+    # Solidity frames are "<test suite path>::<test name>" (see
+    # finding_parser.py) — the test file itself, not the vulnerable src/
+    # contract, so there's no sound file to key an upstream git-log diff on.
+    # crash_file_from_frame() deliberately always returns None for this
+    # domain rather than guessing; novelty-checking degrades to
+    # NOVELTY_NOT_CHECKED instead of diffing the wrong file.
+    assert crash_file_from_frame("test/audit/Exploit_Reentrancy.t.sol::test_Exploit_Reentrancy_DrainVault") is None
     assert crash_file_from_frame("memcpy") is None
     assert crash_file_from_frame("<no-frame>") is None
 
@@ -119,12 +141,22 @@ def test_build_prompt_attack_surface():
     assert "No target-specific" not in p
 
 
+def test_build_prompt_source_target_uses_in_tree_poc():
+    p = build_report_prompt(**_kwargs(
+        binary_path=None, poc_path="/work/test/audit/Exploit.t.sol",
+        reproduction_command="forge test --match-path test/audit/Exploit.t.sol",
+    ))
+    assert "/work/test/audit/Exploit.t.sol" in p
+    assert "/tmp/poc.bin" not in p
+    assert "None" not in p
+
+
 def test_build_prompt_has_raw_asan_no_preparse():
-    # Report agent reads raw ASAN, not pipeline-preparsed crash_type/top_frame
+    # Report agent reads raw test output, not pipeline-preparsed class/top_frame
     p = build_report_prompt(**_kwargs())
     assert "Static severity" not in p
     assert "Top frame" not in p
-    assert "classify the crash type" in p.lower()
+    assert "classify the vulnerability class" in p.lower()
 
 
 # ── representative picker ────────────────────────────────────────────────────

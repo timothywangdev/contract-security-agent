@@ -73,14 +73,35 @@ def ensure_base() -> str:
 
 @functools.lru_cache(maxsize=None)
 def ensure(target_tag: str) -> str:
-    """Build (if missing) and return the agent-image tag for ``target_tag``."""
+    """Build (if missing) and return the agent-image tag for ``target_tag``.
+
+    Builds FROM the target's own image, not a shared base layered with
+    ``COPY --from=target_tag /work /work``. That older approach (still used
+    by dnr_harness's separate ``ensure()``, which has a fixed, known app
+    runtime) assumed everything the prompts need beyond the compiled binary
+    already lived in the shared ``gcc``-based ``ensure_base()`` image (true
+    for C/C++'s ``xxd``/``gdb``, which the target Dockerfile template also
+    installs itself, redundantly but harmlessly) or under ``/work``. It
+    silently dropped anything else a target installed elsewhere — e.g. a
+    Solidity target's ``forge``/``solc``/``slither``/``halmos``, which live
+    outside ``/work``. Building FROM the target image instead preserves its
+    entire toolchain; the cost is one slightly slower first build per
+    target — the node/npm install layer still caches across repeated runs
+    against the same target image."""
     validate_tag(target_tag)
     tag = agent_tag(target_tag)
     if docker_ops.image_exists(tag):
         return tag
-    ensure_base()
     build(
-        f"FROM {BASE_TAG}\nCOPY --from={target_tag} /work /work\n",
+        textwrap.dedent(f"""\
+            FROM {target_tag}
+            USER root
+            RUN apt-get update && \\
+                apt-get install -y --no-install-recommends nodejs npm ca-certificates && \\
+                rm -rf /var/lib/apt/lists/* && \\
+                npm install -g @anthropic-ai/claude-code@{CLAUDE_CODE_VERSION}
+            WORKDIR /work
+        """),
         tag,
     )
     subprocess.run(

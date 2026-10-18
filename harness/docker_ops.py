@@ -104,7 +104,7 @@ def write_file(container: str, path: str, content: bytes) -> None:
     container's own view of the filesystem — under gVisor, ``/tmp`` is an
     in-sandbox tmpfs that host-side ``docker cp`` can't reach."""
     subprocess.run(
-        ["docker", "exec", "-i", container, "sh", "-c", 'cat > "$1"', "_", path],
+        ["docker", "exec", "-i", container, "sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "_", path],
         input=content,
         check=True,
         capture_output=True,

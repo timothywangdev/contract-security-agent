@@ -17,42 +17,47 @@ parallel vulnerability hunters.
 You are running inside an isolated sandbox with the target source. Explore directly.
 
 - Source root: {source_root}
-- Binary entry point: `{binary_path} <input_file>`
-- Project: {github_url} @ {commit}
+{binary_line}- Project: {github_url} @ {commit}
 
 ## Task
 
-Identify 5–15 distinct subsystems that process untrusted input. Each will be
-assigned to one find-agent for a deep-dive. They need to be independent enough
-that N agents working in parallel won't converge on the same bugs.
+Identify 5–15 distinct contracts or modules that handle untrusted input or
+value transfer. Each will be assigned to one find-agent for a deep-dive. They
+need to be independent enough that N agents working in parallel won't
+converge on the same findings.
 
-**Good partitions** — different parsers, different formats, different protocol
-stages. Example: PNG decoder vs JPEG decoder vs GIF decoder.
+**Good partitions** — different contracts, different responsibilities, different
+trust boundaries. Example: ERC20 token module vs staking/rewards module vs
+governance module.
 
-**Bad partitions** — too narrow ("line 47"), too broad ("all of parsing"), or
-overlapping (two areas that funnel into the same code path).
+**Bad partitions** — too narrow ("one line in one function"), too broad ("all
+of accounting"), or overlapping (two areas that funnel into the same state
+transition).
 
 ## Exploration
 
-1. List the source tree: `find {source_root} -type f -name '*.c' -o -name '*.h' -o -name '*.cc' -o -name '*.cpp'`
-2. Read entry points and dispatch code — look for format magic-byte checks,
-   switch statements on input types, parser registration tables.
-3. For each subsystem: note the function-name prefix or file, and what
-   operations it performs (decompression, table lookups, length-prefixed
-   parsing, etc). These hints steer the find-agent toward likely bug patterns.
+1. List the source tree: `find {source_root} -type f -name '*.sol'`
+2. Read entry points and dispatch code — look for external/public functions,
+   access-control modifiers, state-variable layout, and external calls
+   (other contracts, tokens, oracles).
+3. For each subsystem: note the contract/function-name pattern or file, and
+   what operations it performs (share accounting, reward distribution,
+   privileged parameter changes, external-call sequencing, etc). These hints
+   steer the find-agent toward likely bug classes (reentrancy, access
+   control, accounting/share-price manipulation, rounding).
 
 ## Output Format
 
 Emit a `<focus_areas>` tag with ONE area per line. Each line is handed
 verbatim to a find-agent as "concentrate here", so make it self-contained.
 
-Pattern: `<subsystem name> (<function/file pattern>) — <key operations>`
+Pattern: `<subsystem name> (<contract/function pattern>) — <key operations>`
 
 Example:
 <focus_areas>
-Alpha parser (parse_alpha) — heap allocation with input-controlled copy length
-Bravo parser (parse_bravo) — fixed stack buffer, unbounded copy
-Charlie parser (parse_charlie) — conditional early-free with fall-through
+ERC20 token module (Token.sol, transfer/transferFrom) — fee-on-transfer accounting, allowance edge cases
+Staking/rewards module (Staking.sol, stake/claim/withdraw) — share-price accrual, reward-per-token rounding
+Governance module (Governor.sol, propose/vote/execute) — privileged parameter changes, timelock bypass
 </focus_areas>
 
 Emit the tag once. Do not send further messages after.
@@ -65,9 +70,10 @@ def build_recon_prompt(
     source_root: str,
     binary_path: str,
 ) -> str:
+    binary_line = f"- Entry point: `{binary_path} <input_file>`\n" if binary_path else ""
     return RECON_PROMPT_TEMPLATE.format(
         github_url=github_url,
         commit=commit,
         source_root=source_root,
-        binary_path=binary_path,
+        binary_line=binary_line,
     )

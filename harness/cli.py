@@ -44,7 +44,7 @@ from pathlib import Path
 from . import docker_ops, sandbox
 from .agent import color
 from .artifacts import CrashArtifact, RunResult
-from .asan import asan_excerpt, crash_reason, top_frame
+from .finding_parser import asan_excerpt, crash_reason, top_frame
 from .config import TargetConfig
 from .dedup import dedup
 from .find import run_find, DEFAULT_FIND_MAX_TURNS
@@ -496,10 +496,17 @@ async def _stream_report(
     frame = top_frame(crash.crash_output) or ""
     crash_file = crash_file_from_frame(frame)
     log = None
-    if novelty:
-        print(f"[report:{run_idx}→bug_{bug_id:02d}] novelty: fetching upstream log for {crash_file or '?'} ...")
+    if novelty and crash_file:
+        print(f"[report:{run_idx}→bug_{bug_id:02d}] novelty: fetching upstream log for {crash_file} ...")
         log = upstream_log(target.github_url, target.commit,
-                           crash_file or "", max_bytes=2000)
+                           crash_file, max_bytes=2000)
+    elif novelty:
+        # crash_file_from_frame() returns None for source-based targets
+        # (e.g. Solidity): the "frame" is the generated test file, not a
+        # src/ file with meaningful upstream history — an empty-string
+        # upstream_log() call would glob-match everything. Leave log=None
+        # so this renders as NOVELTY_NOT_CHECKED below, not a bogus match.
+        print(f"[report:{run_idx}→bug_{bug_id:02d}] novelty: not applicable for this target (no source file could be identified)")
 
     print(color(f"[report:{run_idx}→bug_{bug_id:02d}] starting ({len(crash.poc_bytes)}B PoC) ...", "report"))
     try:
@@ -578,10 +585,11 @@ def _seed_found_bugs(path: Path, known_bugs: list[str]) -> None:
 
 
 def _append_found(path: Path, crash: CrashArtifact, run_idx: int) -> None:
-    # Raw ASAN excerpt — SUMMARY line + first stack frames. Agents parse the
-    # signature themselves; the pipeline doesn't pre-canonicalize crash_type or
-    # top_frame anymore (that was a fragility point — adjacent lines, format
-    # variance, free-text agent tags all fragmented the dedup).
+    # Raw finding excerpt — failing-test identifiers + revert reasons/decoded
+    # logs, from Foundry/Halmos JSON. Agents parse the signature themselves;
+    # the pipeline doesn't pre-canonicalize crash_type or top_frame anymore
+    # (that was a fragility point — adjacent lines, format variance,
+    # free-text agent tags all fragmented the dedup).
     entry = {
         "run_idx": run_idx,
         "asan_excerpt": asan_excerpt(crash.crash_output),
@@ -602,7 +610,7 @@ def _read_found_summaries(path: Path) -> list[str]:
             d = json.loads(line)
         except json.JSONDecodeError:
             continue
-        # Config-seeded entries are prose; runtime entries carry ASAN excerpts.
+        # Config-seeded entries are prose; runtime entries carry finding excerpts.
         out.append(d.get("asan_excerpt") or d.get("summary") or "")
     return [s for s in out if s]
 
@@ -848,9 +856,10 @@ def main() -> int:
                             "in minutes, not hours; stragglers don't block disk writes. "
                             "Recommended. Off by default for batch-mode compatibility.")
     p_run.add_argument("--accept-dos", dest="accept_dos", action="store_true",
-                       help="Benchmark mode — DoS-class crashes (allocation-size-too-big, "
-                            "stack exhaustion, alloc-driven null-derefs) count as valid "
-                            "finds; agents won't skip them hunting for memory corruption")
+                       help="Benchmark mode — DoS/gas-griefing-class findings (unbounded "
+                            "loops, block-gas-limit exhaustion, griefing-vector reverts) "
+                            "count as valid finds; agents won't skip them hunting for "
+                            "higher-severity vulnerabilities")
     p_run.add_argument("--novelty", action="store_true",
                        help="(--stream only) Enable host-side upstream novelty check for reports. "
                             "Clones github_url; off by default for air-gapped environments.")
@@ -985,7 +994,7 @@ def _cmd_run(args) -> int:
     print(f"Target: {target.name}")
     print(f"  image_tag:   {target.image_tag}")
     print(f"  model:       {args.model}")
-    print(f"  binary:      {target.binary_path}")
+    print(f"  binary:      {target.binary_path or '(none — source-based target)'}")
     print(f"  source_root: {target.source_root}")
     print(f"  max_turns:   {args.max_turns}")
     print(f"  runs:        {args.runs}{' (parallel)' if args.parallel else ''}")
@@ -1140,10 +1149,15 @@ async def _report_one(
 
     crash_file = crash_file_from_frame(frame)
     log = None
-    if args.novelty:
-        print(f"[report:{idx}] novelty: fetching upstream log for {crash_file or '?'} ...")
+    if args.novelty and crash_file:
+        print(f"[report:{idx}] novelty: fetching upstream log for {crash_file} ...")
         log = upstream_log(target.github_url, target.commit,
-                           crash_file or "", max_bytes=2000)
+                           crash_file, max_bytes=2000)
+    elif args.novelty:
+        # See the matching comment above _report_one(): crash_file is None
+        # for source-based (e.g. Solidity) targets, where an upstream diff
+        # of the generated test file would be meaningless.
+        print(f"[report:{idx}] novelty: not applicable for this target (no source file could be identified)")
 
     print(color(f"[report:{idx}] {crash_type} in {frame} "
                 f"(from {rep_path.parent.name}, {len(crash.poc_bytes)}B PoC) ...", "report"))

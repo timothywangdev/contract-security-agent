@@ -963,18 +963,20 @@ Wrote ./TRIAGE.md and ./TRIAGE.json
 Smoke test (five-finding fixture: 2 real, 1 dup, 2 FP):
 
 ```
-/triage .claude/skills/triage/fixtures/canary-findings.json --auto --repo targets/canary
+/triage .claude/skills/triage/fixtures/canary-findings.json --auto --repo targets/solidity-canary
 ```
 
 Expected: f001 and f003 confirmed; f002 duplicate of f001; f004 dropped
-(`misread_code`: it's a read buffer, not a randomness source); f005 dropped
-(`already_handled`: there is a null check at line 68).
+(`misread_code`: `deposit()` makes no external call, so it can't be
+reentrant); f005 dropped (`already_handled`/unreachable: `totalShares` can
+only be 0 before any shares exist, and the preceding `require` on the
+caller's own share balance already rules that out).
 
 Or against pipeline output:
 
 ```
-vuln-pipeline run drlibs --runs 3 --parallel --stream
-/triage results/drlibs/<ts>/ --repo targets/drlibs
+vuln-pipeline run solidity-canary --runs 3 --parallel --stream
+/triage results/solidity-canary/<ts>/ --repo targets/solidity-canary
 ```
 
 Hand-check a sample of TRUE_POSITIVE/HIGH results (the `first_links` should

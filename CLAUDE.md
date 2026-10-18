@@ -1,12 +1,29 @@
 # Claude for Securing Source Code
 
-**This fork adds a third half for smart-contract auditing — read this section
-first.** The rest of this file is upstream's original C/C++ operator guide,
-unmodified.
+**This fork retargeted the whole pipeline at Solidity/Foundry smart-contract
+auditing — read this section first.** Below this, the rest of the file is the
+upstream pipeline operator guide; its mechanics (CLI flags, sandboxing,
+dedup/patch semantics) are accurate and unmodified, but any wording that
+still says "C/C++"/"ASAN"/"crash" describes the mechanism generically — the
+actual domain content (prompts, the finding parser, the shipped target) is
+now Solidity. This retarget was done via `.claude/skills/customize/` (the
+pipeline's own documented porting workflow) — see `docs/product-plan/` for
+the original planning docs and rationale.
 
+- **`vuln-pipeline`** (`harness/`) — the autonomous pipeline. Docker +
+  Foundry/Slither/Halmos (not ASAN anymore), executes target code, needs a
+  sandbox (see `docs/security.md`). Route here when the user wants an
+  autonomous find → grade → report → patch loop against a Solidity target
+  directory (`targets/solidity-canary/` is the shipped fast smoke test; add
+  your own under `targets/<name>/` per `targets/README.md`'s Solidity
+  section). A real-world validation path against Anthropic's scone-bench
+  (417 historical DeFi incidents, forked on anvil) is noted but not yet
+  wired up as a `vuln-pipeline` target kind — see `docs/product-plan/` for
+  status.
 - **`contract_security_agent/`** (`csa` / `contract-security-agent` CLI) — a
-  standalone, one-command, execution-verified Solidity/Foundry audit tool.
-  `csa audit <path-to-foundry-project>` snapshots an arbitrary local Foundry
+  separate, standalone, one-command, execution-verified Solidity/Foundry
+  audit tool that predates and complements `vuln-pipeline`'s retarget.
+  `csa audit <path-to-foundry-project>` snapshots an *arbitrary* local Foundry
   project, runs it against a single pre-built tool image (Foundry + Slither +
   Halmos, see `docker/Dockerfile.tools`), and produces a Markdown/JSON report
   with reproducible evidence — no per-target Dockerfile/config.yaml authoring
@@ -14,11 +31,10 @@ unmodified.
   prerequisites (Docker, the tool image, Claude Code auth) without running any
   target code. `csa reproduce`/`csa verify-fix` replay a saved finding or
   retest a supplied fix. This is the easiest on-ramp for a smart-contract
-  engineer who wants to point the tool at their own repo — see
-  `docs/product-plan/` (the original planning docs for this fork: MASTER_PLAN,
-  TOOL_RESEARCH, EXPERIMENT_PLAN/TRACKER) for the full design rationale,
-  including why it computes verdicts from protected checkers rather than
-  model self-reports, unlike upstream's `grade.py`.
+  engineer who wants to point the tool at their own repo with zero `targets/`
+  setup — see `docs/product-plan/` for the full design rationale, including
+  why it computes verdicts from protected checkers rather than model
+  self-reports, unlike upstream's `grade.py`.
   Fixtures: `examples/vault` (vulnerable reentrancy) /
   `examples/vault-fixed` (patched) / `examples/checks` (the independent
   trusted-oracle test) are a ready-made vulnerable/fixed pair for a first run:
@@ -30,9 +46,6 @@ unmodified.
   share-price/accounting manipulation, oracle manipulation, unchecked
   external calls, delegatecall storage collisions). This is the lowest-
   friction entry point — nothing to install, works on any directory.
-
-This repo otherwise has two halves (upstream's original framing):
-
 - **Interactive skills** (`.claude/skills/`) — read and write files in the
   repo (no target-code execution, except `/dnr-hunt` / `/dnr-respond`, which
   run the bundled demo app locally — see `docs/security.md`), run in this
@@ -41,22 +54,17 @@ This repo otherwise has two halves (upstream's original framing):
   bootstrap-then-interview → `THREAT_MODEL.md`), `/vuln-scan` (static review →
   `VULN-FINDINGS.json`), `/triage` (verify + dedupe + rank a findings pile),
   `/patch` (generate candidate fixes → `PATCHES/`), `/dnr-hunt` /
-  `/dnr-respond` (detection & response over logs), `/customize` (port the
-  pipeline to another stack — this is literally how this Solidity fork's plan
-  was drafted). Route the user to these for scoping, static review, Q&A, and
-  post-run triage. (`/verify` is contributor tooling for validating harness
-  changes on docker-less hosts, not part of the user flow.)
-- **`vuln-pipeline`** (`harness/`) — the autonomous pipeline. Docker + ASAN,
-  executes target code, needs a sandbox (see `docs/security.md`). Route here
-  when the user wants to actually find and verify crashes in **C/C++**
-  targets — this half is unmodified upstream code; it does not understand
-  Solidity. A real-world validation path against Anthropic's scone-bench
-  (417 historical DeFi incidents, forked on anvil) is noted but not yet
-  wired up as a `vuln-pipeline` target kind — see `docs/product-plan/` for
-  status.
+  `/dnr-respond` (detection & response over logs, unrelated to the Solidity
+  retarget), `/customize` (port the pipeline to another stack — this is
+  literally how this Solidity retarget was done). Route the user to these for
+  scoping, static review, Q&A, and post-run triage. (`/verify` is contributor
+  tooling for validating harness changes on docker-less hosts, not part of
+  the user flow.)
 
-Docs for each topic are in `docs/`; targets are in `targets/` (canary is the
-fast smoke test). The rest of this file is the pipeline operator guide.
+Docs for each topic are in `docs/`; targets are in `targets/`
+(`solidity-canary` is the fast smoke test; `dnrcanary` is the unrelated
+detection-response demo). The rest of this file is the pipeline operator
+guide.
 
 ---
 
@@ -199,15 +207,18 @@ tier results land as `t0_builds`/`t1_poc_stops`/`t2_tests_pass`/`re_attack_clean
 
 **Before launching, check the target's `config.yaml` has a `build_command`.**
 Without it the grader can't recompile after applying the diff and the CLI
-will error early. The four shipped targets have it.
+will error early. The shipped `solidity-canary` target has it
+(`forge build --offline`).
 
-**Tell the user the ladder verifies the crash is gone, not that the diff is
+**Tell the user the ladder verifies the finding is gone, not that the diff is
 safe to upstream.** Surface `patch.diff` for human review and point at
 `docs/patching.md#reviewing-generated-patches` for what to look for. Don't
 offer to apply the diff to anything outside the pipeline containers.
 
-For a quick demo without a prior find run, point at the canary fixture:
-`vuln-pipeline patch targets/canary/fixtures/results_sample --model <m>`.
+There's no pre-baked `results_sample` fixture for a quick patch-only demo on
+`solidity-canary` yet (upstream's old canary target had one for its C bugs;
+it didn't carry over) — run `vuln-pipeline run solidity-canary` first to get
+a real `results/solidity-canary/<timestamp>/` to patch.
 
 **`--accept-dos` (off by default)** lowers the find-agent's submission floor
 for benchmark/validation runs. The default quality bar rules out DoS-class
@@ -285,22 +296,25 @@ it accept `--permission-mode bypassPermissions`. Don't remove either.
 `--allowedTools` is a permission allowlist; `--tools` actually restricts the
 available set.
 
-**Canary parsers need `__attribute__((noinline))`.** At `-O1` they inline into
-`main`, which changes the ASAN signature. If adding a canary parser, mark it.
-
 **Model is a runtime arg, not config.** Always `--model` flag or
 `VULN_PIPELINE_MODEL` env. `TargetConfig` has no model field by design.
 
 ## Adding a target
 
-Directory under `targets/` with a Dockerfile (ASAN build) + `config.yaml`. No
-pipeline code changes. See `targets/README.md`.
+Directory under `targets/` with a Dockerfile (Foundry/Slither/Halmos build,
+not ASAN anymore) + `config.yaml`. `binary_path` is optional — omit it for a
+Solidity target, since there's no single binary (`source_root` is the
+Foundry project root instead). No pipeline code changes. See
+`targets/README.md`'s Solidity section.
 
-**Shipped targets:** `canary` is the fast-iteration smoke test (~6min, 3
-planted bugs). `drlibs`, `alsa`, and `htslib` are real-world CVE demo
-targets — pinned to vulnerable commits, with per-target READMEs documenting
-the CVEs and expected find times. htslib is the harder of the set (CRAM
-container format, 10-CVE cluster).
+**Shipped targets:** `solidity-canary` is the fast-iteration smoke test
+(~1-2min build, 3 planted bugs: reentrancy in `ReentrancyVault`, a missing
+access-control check in `FeeManager`, and a donation/first-depositor
+share-price manipulation in `ShareVault`). `known_bugs` is deliberately left
+empty so it stays a real discovery exercise. The upstream C/C++ demo targets
+(`canary`, `drlibs`, `alsa`, `htslib`) were removed as part of this retarget
+— their `find`/`grade`/`report` prompts no longer apply to them anyway, since
+the pipeline's domain content is now Solidity-only.
 
 ## Detection & response track
 
@@ -328,8 +342,11 @@ spoilers — never mount or read them on the hunt side. See
 ## Tests
 
 `pytest tests/`. Unit coverage spans tag/XML parsing, artifact serialization,
-ASAN signature extraction, focus-area rendering, dedup signatures,
-`found_bugs.jsonl` handling, the judge and compare agents, report parsing, the
-T0–T3 patch-grade ladder, the `/threat-model` and `/triage` skill checkpoint
-files, and system-prompt construction. No integration tests — canary is the
-fast integration path (`--runs 3 --parallel --max-turns 50`).
+finding extraction (`tests/test_finding_parser.py` — Foundry/Halmos JSON, not
+ASAN), focus-area rendering, dedup signatures, `found_bugs.jsonl` handling,
+the judge and compare agents, report parsing, the T0–T3 patch-grade ladder
+(`tests/test_patch_grade_e2e.py` runs the T0-T3 ladder for real against
+`solidity-canary` with real Docker, no LLM), the `/threat-model` and
+`/triage` skill checkpoint files, and system-prompt construction. No
+end-to-end agent integration test — `solidity-canary` is the fast path for
+that (`--runs 3 --parallel --max-turns 50`).

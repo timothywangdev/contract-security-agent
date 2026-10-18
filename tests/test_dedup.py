@@ -11,40 +11,55 @@ from harness.dedup import _signature, dedup, format_report, NO_FRAME
 
 
 # ── _signature ───────────────────────────────────────────────────────────────
+# Fixtures are `forge test --offline --json` / Halmos JSON output (what
+# finding_parser.py actually parses), not ASAN traces.
 
-ASAN_TRACE_A = """\
-==1==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000110
-READ of size 4 at 0x602000000110 thread T0
-    #0 0x55a1b2c3d4e5 in decode_chunk /work/decoder.h:4521:9
-    #1 0x55a1b2c3d600 in decode_image /work/decoder.h:4890:12
-SUMMARY: AddressSanitizer: heap-buffer-overflow /work/decoder.h:4521 in decode_chunk
-"""
+SUITE_A = "test/audit/Exploit_Reentrancy_DrainVault.t.sol:ExploitTest"
+TEST_A = "test_Exploit_Reentrancy_DrainVault"
+REASON_A = "VIOLATION: attacker drained other depositors' funds via reentrant withdraw"
+TRACE_A = json.dumps({SUITE_A: {"test_results": {f"{TEST_A}()": {
+    "status": "Failure", "reason": REASON_A, "decoded_logs": [],
+}}}})
 
-ASAN_TRACE_B = """\
-==2==ERROR: AddressSanitizer: stack-buffer-overflow
-WRITE of size 17 at 0x7f58 thread T0
-    #0 0x7f2fc7a657ee in memcpy (/usr/local/lib64/libasan.so.8+0xf27ee)
-    #1 0x4013d9 in parse_bravo /work/entry.c:40
-SUMMARY: AddressSanitizer: stack-buffer-overflow in memcpy
-"""
+SUITE_B = "test/audit/Exploit_AccessControl_SetFeeRecipient.t.sol:ExploitTest"
+TEST_B = "test_Exploit_AccessControl_SetFeeRecipient"
+REASON_B = "VIOLATION: unauthorized caller changed fee recipient"
+TRACE_B = json.dumps({SUITE_B: {"test_results": {f"{TEST_B}()": {
+    "status": "Failure", "reason": REASON_B, "decoded_logs": [],
+}}}})
 
-ASSERTION_OUTPUT = "entry: /work/decoder.h:4521: decode_chunk: Assertion `n >= 1 && n <= 4' failed.\n"
+# Same finding as TRACE_A, but as a Halmos counterexample instead of a forge
+# test failure — a different raw shape that should still dedup identically
+# *given the same suite identifier* (in practice each tool's path format may
+# differ; the point here is that _signature()/top_frame() treat whatever
+# identifier they're given as an opaque key, not that forge and Halmos
+# happen to agree on formatting).
+HALMOS_TRACE_A = json.dumps({
+    "test_results": {SUITE_A: [
+        {"name": f"{TEST_A}()", "exitcode": 1, "models": [{"is_valid": True, "args": {"amount": 1}}]},
+    ]},
+    "exitcode": 1,
+})
 
 
 def test_signature_basic():
-    crash = {"crash_type": "heap-buffer-overflow", "crash_output": ASAN_TRACE_A}
-    assert _signature(crash) == ("heap-buffer-overflow", "decode_chunk /work/decoder.h:4521")
+    crash = {"crash_type": "Reentrancy", "crash_output": TRACE_A}
+    assert _signature(crash) == ("Reentrancy", f"{SUITE_A}::{TEST_A}()")
 
 
 def test_signature_skips_interceptor():
-    crash = {"crash_type": "stack-buffer-overflow", "crash_output": ASAN_TRACE_B}
-    assert _signature(crash) == ("stack-buffer-overflow", "parse_bravo /work/entry.c:40")
+    # Historical name (upstream skipped ASAN interceptor frames); here it
+    # just confirms a distinct finding gets its own distinct signature.
+    crash = {"crash_type": "AccessControl", "crash_output": TRACE_B}
+    assert _signature(crash) == ("AccessControl", f"{SUITE_B}::{TEST_B}()")
 
 
 def test_signature_assertion():
-    # glibc assert() has no #N frames; same function as ASAN_TRACE_A, same dedup shape
-    crash = {"crash_type": "assertion-failure", "crash_output": ASSERTION_OUTPUT}
-    assert _signature(crash) == ("assertion-failure", "decode_chunk /work/decoder.h:4521")
+    # A Halmos counterexample for the SAME exploit as TRACE_A should dedup
+    # to the same signature as the forge-test version — format-agnostic.
+    forge_crash = {"crash_type": "Reentrancy", "crash_output": TRACE_A}
+    halmos_crash = {"crash_type": "Reentrancy", "crash_output": HALMOS_TRACE_A}
+    assert _signature(forge_crash) == _signature(halmos_crash)
 
 
 def test_signature_no_frame_fallback():
@@ -78,23 +93,27 @@ def _write_result(path, status, crash_type=None, crash_output=None):
     }))
 
 
+SIG_A = ("Reentrancy", f"{SUITE_A}::{TEST_A}()")
+SIG_B = ("AccessControl", f"{SUITE_B}::{TEST_B}()")
+
+
 def _build_tree(tmp_path):
     """3 crashes on signature A, 1 on B, plus a no-crash and a rejected-on-A."""
     root = tmp_path / "results" / "synthetic" / "20260101T000000Z"
 
     # run_000, run_002: same bug, both passed
     _write_result(root / "run_000" / "result.json", "crash_found",
-                  "heap-buffer-overflow", ASAN_TRACE_A)
+                  "Reentrancy", TRACE_A)
     _write_result(root / "run_002" / "result.json", "crash_found",
-                  "heap-buffer-overflow", ASAN_TRACE_A)
+                  "Reentrancy", TRACE_A)
 
     # run_003: same bug, grader bounced it — still groups with the above
     _write_result(root / "run_003" / "result.json", "crash_rejected",
-                  "heap-buffer-overflow", ASAN_TRACE_A)
+                  "Reentrancy", TRACE_A)
 
     # run_001: different bug
     _write_result(root / "run_001" / "result.json", "crash_found",
-                  "stack-buffer-overflow", ASAN_TRACE_B)
+                  "AccessControl", TRACE_B)
 
     # run_004: no crash — should be skipped
     _write_result(root / "run_004" / "result.json", "no_crash_found")
@@ -106,20 +125,16 @@ def test_dedup_groups_duplicates(tmp_path):
     root = _build_tree(tmp_path)
     groups = dedup(root)
 
-    sig_a = ("heap-buffer-overflow", "decode_chunk /work/decoder.h:4521")
-    sig_b = ("stack-buffer-overflow", "parse_bravo /work/entry.c:40")
-
-    assert set(groups.keys()) == {sig_a, sig_b}
-    assert len(groups[sig_a]) == 3
-    assert len(groups[sig_b]) == 1
+    assert set(groups.keys()) == {SIG_A, SIG_B}
+    assert len(groups[SIG_A]) == 3
+    assert len(groups[SIG_B]) == 1
 
 
 def test_dedup_includes_rejected(tmp_path):
     root = _build_tree(tmp_path)
     groups = dedup(root)
 
-    sig_a = ("heap-buffer-overflow", "decode_chunk /work/decoder.h:4521")
-    statuses = {status for _, status, _ in groups[sig_a]}
+    statuses = {status for _, status, _ in groups[SIG_A]}
     assert statuses == {"crash_found", "crash_rejected"}
 
 
@@ -127,23 +142,21 @@ def test_dedup_parses_operation(tmp_path):
     root = _build_tree(tmp_path)
     groups = dedup(root)
 
-    sig_a = ("heap-buffer-overflow", "decode_chunk /work/decoder.h:4521")
-    sig_b = ("stack-buffer-overflow", "parse_bravo /work/entry.c:40")
-
-    ops_a = {r["operation"] for _, _, r in groups[sig_a]}
-    ops_b = {r["operation"] for _, _, r in groups[sig_b]}
-    assert ops_a == {"READ"}
-    assert ops_b == {"WRITE"}
+    ops_a = {r["operation"] for _, _, r in groups[SIG_A]}
+    ops_b = {r["operation"] for _, _, r in groups[SIG_B]}
+    assert ops_a == {REASON_A}
+    assert ops_b == {REASON_B}
 
 
 def test_dedup_signature_prefers_parsed_type(tmp_path):
-    # Agent wrote free-text "overflow!!" but SUMMARY line says heap-buffer-overflow.
+    # Agent wrote free-text "overflow!!" but the test actually failed as a
+    # parseable Reentrancy finding.
     root = tmp_path / "batch"
     _write_result(root / "run_000" / "result.json", "crash_found",
-                  "overflow!!", ASAN_TRACE_A)
+                  "overflow!!", TRACE_A)
     groups = dedup(root)
     # Signature key uses the pipeline-parsed type, not the agent tag.
-    assert ("heap-buffer-overflow", "decode_chunk /work/decoder.h:4521") in groups
+    assert SIG_A in groups
 
 
 def test_dedup_skips_null_crash(tmp_path):
@@ -159,9 +172,9 @@ def test_dedup_walks_nested_batches(tmp_path):
     # Two timestamp dirs, each with a single-run layout (no run_NNN subdir)
     target_root = tmp_path / "results" / "synthetic"
     _write_result(target_root / "20260101T000000Z" / "result.json", "crash_found",
-                  "heap-buffer-overflow", ASAN_TRACE_A)
+                  "Reentrancy", TRACE_A)
     _write_result(target_root / "20260102T000000Z" / "result.json", "crash_found",
-                  "heap-buffer-overflow", ASAN_TRACE_A)
+                  "Reentrancy", TRACE_A)
 
     groups = dedup(target_root)
     assert len(groups) == 1
@@ -172,7 +185,7 @@ def test_dedup_walks_nested_batches(tmp_path):
 def test_dedup_skips_malformed_json(tmp_path):
     root = tmp_path / "batch"
     _write_result(root / "run_000" / "result.json", "crash_found",
-                  "heap-buffer-overflow", ASAN_TRACE_A)
+                  "Reentrancy", TRACE_A)
     (root / "run_001").mkdir(parents=True)
     (root / "run_001" / "result.json").write_text("{ not valid json")
 
@@ -193,8 +206,8 @@ def test_format_report_sorted_by_count(tmp_path):
     report = format_report(groups, root)
 
     # A (3 crashes) sorts before B (1 crash) — larger group first.
-    pos_a = report.index("heap-buffer-overflow")
-    pos_b = report.index("stack-buffer-overflow")
+    pos_a = report.index("Reentrancy")
+    pos_b = report.index("AccessControl")
     assert pos_a < pos_b
 
     assert "[3x]" in report
@@ -205,8 +218,8 @@ def test_format_report_sorted_by_count(tmp_path):
 def test_format_report_shows_operation(tmp_path):
     root = _build_tree(tmp_path)
     report = format_report(dedup(root), root)
-    assert "stack-buffer-overflow (WRITE)" in report
-    assert "heap-buffer-overflow (READ)" in report
+    assert f"AccessControl ({REASON_B})" in report
+    assert f"Reentrancy ({REASON_A})" in report
 
 
 def test_format_report_shows_relative_paths(tmp_path):

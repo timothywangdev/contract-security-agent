@@ -1,0 +1,26 @@
+diff --git a/src/ReentrancyVault.sol b/src/ReentrancyVault.sol
+index 14e06d6..6976c7b 100644
+--- a/src/ReentrancyVault.sol
++++ b/src/ReentrancyVault.sol
+@@ -6,6 +6,7 @@ pragma solidity 0.8.26;
+ /// deposited.
+ contract ReentrancyVault {
+     mapping(address => uint256) public credits;
++    mapping(address => uint256) private _pendingWithdrawAmount;
+ 
+     function deposit() external payable {
+         credits[msg.sender] += msg.value;
+@@ -13,10 +14,13 @@ contract ReentrancyVault {
+ 
+     function withdraw(uint256 amount) external {
+         require(credits[msg.sender] >= amount, "insufficient credit");
++        require(_pendingWithdrawAmount[msg.sender] != amount, "reentrant same-amount withdrawal blocked");
++        _pendingWithdrawAmount[msg.sender] = amount;
+         (bool sent,) = msg.sender.call{value: amount}("");
+         require(sent, "transfer failed");
+         unchecked {
+             credits[msg.sender] -= amount;
+         }
++        _pendingWithdrawAmount[msg.sender] = 0;
+     }
+ }

@@ -1,0 +1,38 @@
+# Copyright 2026 Anthropic PBC
+# Copyright 2026 Contract Security Agent contributors
+# SPDX-License-Identifier: Apache-2.0
+image_tag: vuln-pipeline-solidity-canary:latest
+# Local-only canary — no upstream. These fields are required by the loader
+# but only used for display in the find prompt.
+github_url: "(local canary target — targets/solidity-canary/src/)"
+commit: "n/a"
+# No single binary for a Foundry project — binary_path is omitted.
+source_root: /work
+build_command: forge build --offline
+test_command: forge test --offline
+
+known_bugs: []
+
+attack_surface: |
+  Local canary — a tiny Foundry project with three independent contracts,
+  each with one deliberately planted bug:
+
+  - ReentrancyVault (src/ReentrancyVault.sol): deposit()/withdraw(uint256).
+    withdraw sends ETH via a raw call before debiting the caller's credit
+    balance, and the debit itself is unchecked — a reentrant withdraw call
+    can drain more than the attacker ever deposited.
+  - FeeManager (src/FeeManager.sol): setFeeRecipient(address)/pause().
+    setFeeRecipient has no access-control check, so any caller — not just
+    owner — can redirect protocol fees to themselves. pause() is correctly
+    owner-gated, for contrast.
+  - ShareVault (src/ShareVault.sol): deposit()/withdraw(uint256), plus a
+    public receive(). Share price is assets-per-share computed from
+    address(this).balance; an attacker can donate ETH directly via receive()
+    to inflate the balance without minting shares, diluting a subsequent
+    depositor down to zero shares and capturing their deposit.
+
+  All three are reachable by any external caller — no privileged setup
+  required to reach any of them.
+
+memory_limit: 2g
+build_timeout_s: 600

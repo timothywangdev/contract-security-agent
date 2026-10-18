@@ -32,17 +32,19 @@ you can review and upstream.
 The patch stage ships with the pipeline. No extra install is needed.
 
 Your target's `config.yaml` needs a `build_command` and optionally a 
-`test_command` for use in the verification ladder. All four targets included
-with this repo have `build_command`; only canary sets `test_command`, so
-the regress tier (T2) is skipped on the others.
+`test_command` for use in the verification ladder. The shipped
+`solidity-canary` target has both (`forge build --offline` /
+`forge test --offline`), so the regress tier (T2) runs against its
+`test/Normal.t.sol` legitimate-behavior suite.
 
 ```bash
 # After a pipeline run has produced results/<target>/<ts>/
 bin/vp-sandboxed patch results/<target>/<ts>/ --model <model>
-
-# Or try it standalone on the pre-baked canary fixture (no pipeline run needed)
-bin/vp-sandboxed patch targets/canary/fixtures/results_sample --model <model>
 ```
+
+There's no pre-baked `results_sample` fixture for `solidity-canary` yet
+(upstream's old canary target had one for its C bugs; it didn't carry over
+in this fork's retarget) — run `vuln-pipeline run solidity-canary` first.
 
 Output lands in `<results_dir>/reports/bug_NN/{patch.diff, patch_result.json}`
 alongside the existing exploitability report. Transcripts stream to

@@ -2,48 +2,48 @@
   "findings": [
     {
       "id": "f001",
-      "file": "targets/canary/entry.c",
-      "line": 25,
-      "category": "heap-buffer-overflow",
+      "file": "targets/solidity-canary/src/ReentrancyVault.sol",
+      "line": 16,
+      "category": "reentrancy",
       "severity": "HIGH",
-      "title": "Unbounded memcpy into fixed 8-byte heap buffer in parse_alpha",
-      "description": "parse_alpha allocates 8 bytes then memcpy's `claimed` bytes from attacker-controlled input without bounds check."
+      "title": "withdraw() sends ETH before debiting credits, and the debit is unchecked",
+      "description": "withdraw calls msg.sender.call{value: amount}(\"\") before decrementing credits[msg.sender], and the decrement is inside an `unchecked` block — a reentrant call from a malicious receive()/fallback can drain more than the caller ever deposited."
     },
     {
       "id": "f002",
-      "file": "targets/canary/entry.c",
-      "line": 22,
-      "category": "heap-buffer-overflow",
+      "file": "targets/solidity-canary/src/ReentrancyVault.sol",
+      "line": 18,
+      "category": "reentrancy",
       "severity": "HIGH",
-      "title": "malloc(8) too small for input in parse_alpha",
-      "description": "Same root cause as f001 — fixed-size allocation followed by input-length copy. Duplicate report from a different angle."
+      "title": "unchecked block removes underflow protection on credits decrement",
+      "description": "Same root cause as f001 — checks-effects-interactions violation plus the unchecked subtraction that would otherwise revert on underflow. Duplicate report from a different angle (the subtraction site rather than the call site)."
     },
     {
       "id": "f003",
-      "file": "targets/canary/entry.c",
-      "line": 38,
-      "category": "stack-buffer-overflow",
+      "file": "targets/solidity-canary/src/FeeManager.sol",
+      "line": 17,
+      "category": "access-control",
       "severity": "HIGH",
-      "title": "Unbounded memcpy into fixed stack buffer in parse_bravo",
-      "description": "parse_bravo copies `len` bytes into a fixed-size stack array without bounds check."
+      "title": "setFeeRecipient has no access-control check",
+      "description": "Any caller, not just owner, can redirect protocol fees by calling setFeeRecipient directly. Contrast with pause() at line 21-22, which correctly checks msg.sender == owner."
     },
     {
       "id": "f004",
-      "file": "targets/canary/entry.c",
-      "line": 68,
-      "category": "weak-randomness",
+      "file": "targets/solidity-canary/src/ShareVault.sol",
+      "line": 13,
+      "category": "reentrancy",
       "severity": "MEDIUM",
-      "title": "fread buffer used as randomness source",
-      "description": "Claims the 4096-byte read buffer is used for cryptographic randomness. It's a file-read buffer; no randomness consumer exists."
+      "title": "deposit() is vulnerable to reentrancy",
+      "description": "Claims deposit() makes an external call before updating state, enabling a reentrant drain. deposit() makes no external call at all — it only updates shares/totalShares. This claim does not match the code."
     },
     {
       "id": "f005",
-      "file": "targets/canary/entry.c",
-      "line": 68,
-      "category": "null-pointer-dereference",
+      "file": "targets/solidity-canary/src/ShareVault.sol",
+      "line": 25,
+      "category": "divide-by-zero",
       "severity": "LOW",
-      "title": "Possible null deref if fopen fails",
-      "description": "Claims fread(buf, ...) derefs null f. There is an explicit `if (!f) return 1;` guard on the preceding line."
+      "title": "Possible division by zero in withdraw() if totalShares is 0",
+      "description": "Claims amount = (shareAmount * balance) / totalShares can divide by zero. withdraw() requires shares[msg.sender] >= shareAmount first, and totalShares is only ever 0 before any shares exist — at which point no caller could hold a nonzero share balance to pass that check. Not reachable."
     }
   ]
 }

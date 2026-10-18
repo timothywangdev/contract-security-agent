@@ -21,8 +21,10 @@ Skim these files so your questions are grounded:
 - `harness/prompts/judge_prompt.py` — triage prompt; keys on ASAN excerpts and memory-safety crash classes
 - `harness/prompts/system_prompt.py` — authorization block; hard-codes "C/C++ target" and "sanitizer output"
 - `harness/asan.py` — stack-trace parser for dedup/judge signatures; ASAN-specific regex
+  (**note:** this repo's own `/customize` run already replaced this with `harness/finding_parser.py`
+  for Solidity — read that file instead if the domain here is no longer C/C++ when you run this)
 - `harness/artifacts.py` — `CrashArtifact`, `GraderVerdict`, `JudgeVerdict`, `ReportVerdict` data contracts
-- `harness/config.py`, `targets/drlibs/config.yaml` — target config schema
+- `harness/config.py`, `targets/solidity-canary/config.yaml` — target config schema
 - `targets/README.md` — how a target directory is structured (Dockerfile + config.yaml + entry wrapper)
 
 You don't need `agent.py`, `docker_ops.py`, `recon.py`, `judge.py`, or `novelty.py` in detail — they're generic plumbing (judge/novelty domain-specificity lives in the prompts and the asan parser, not the flow). One caution: part of `harness/` doubles as shared infrastructure — `dnr_harness/` (the detection-and-response pipeline) imports `agent.py`, `sandbox.py`, `docker_ops.py`, `agent_image.py`'s `build`/`ensure_base`, `auth.py`, `cli.py`'s `resolve_target_dir`/`terminate_subprocesses`, and `prompts/system_prompt.py`'s `load_engagement_context`. A domain port should touch only the domain-specific files (the prompts, `asan.py`, `artifacts.py`, target Dockerfiles); treat any edit to the shared files as a change to both pipelines.

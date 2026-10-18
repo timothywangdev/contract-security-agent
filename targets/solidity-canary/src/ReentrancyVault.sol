@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.26;
+
+/// Bug: external call happens before the credit is debited, and the debit is
+/// `unchecked` — a reentrant `withdraw` call drains more than the caller
+/// deposited.
+contract ReentrancyVault {
+    mapping(address => uint256) public credits;
+
+    function deposit() external payable {
+        credits[msg.sender] += msg.value;
+    }
+
+    function withdraw(uint256 amount) external {
+        require(credits[msg.sender] >= amount, "insufficient credit");
+        (bool sent,) = msg.sender.call{value: amount}("");
+        require(sent, "transfer failed");
+        unchecked {
+            credits[msg.sender] -= amount;
+        }
+    }
+}

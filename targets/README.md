@@ -103,6 +103,50 @@ Keep it minimal — it defines the attack surface. ASAN abort happens before
 The pipeline reads `config.yaml` and runs `docker build` on this directory.
 No Python edits needed to add a target.
 
+### Solidity/Foundry targets (no single binary)
+
+A Solidity/Foundry target is still a vuln-pipeline target — same
+`config.yaml` + `Dockerfile` contract, same find→grade→report flow — but it
+has no single ASAN-instrumented binary for the agent to run, so a few fields
+and the Dockerfile template differ from the C/C++ case above.
+
+**`binary_path` is optional and not meaningful here.** `TargetConfig.binary_path`
+defaults to `None`; omit it from `config.yaml` entirely rather than setting
+it to a placeholder. `source_root` is still required — it's the Foundry
+project root inside the container (e.g. `/work`), containing `foundry.toml`,
+`src/`, and `test/`.
+
+```yaml
+image_tag: vuln-pipeline-<name>:latest
+github_url: https://github.com/...   # or a local-only marker, as above
+commit: <full-sha>
+source_root: /work                   # Foundry project root; no binary_path
+build_command: forge build --offline
+test_command: forge test --offline   # regression suite for T2
+```
+
+`build_command`/`test_command` map to `forge build`/`forge test` instead of
+a `gcc`/`make` invocation — pass `--offline` since the sandbox has no
+network. Everything else (`focus_areas`, `known_bugs`, `attack_surface`,
+`memory_limit`, `build_timeout_s`, etc.) means the same thing it does for a
+C/C++ target.
+
+**The Dockerfile template differs.** Instead of `gcc:14` + an `entry.c`
+wrapper, build FROM a Foundry/Solidity base image (pin an exact
+`ghcr.io/foundry-rs/foundry` tag, plus a pinned `solc` binary — see
+`targets/solidity-canary/Dockerfile` for the full pinned-version pattern,
+including the order-sensitive step where installing `slither-analyzer` via
+pip clobbers `/usr/local/bin/solc` and must be re-symlinked afterward), then
+`COPY` the target's own Foundry project (`foundry.toml`, `src/`, `test/`)
+into `source_root`, same "prefer local COPY over git-clone" convention as
+the C/C++ targets. `/bin/bash` must still work; `gdb`/`xxd`/`file` aren't
+needed for this target shape, but keeping `python3` around is cheap and
+some tooling expects it.
+
+See `targets/solidity-canary/` for a complete worked example (three planted
+bugs: reentrancy, missing access control, first-depositor share-price
+manipulation) and its `README.md` for the answer key.
+
 ## Detection & response targets (`kind: dnr`)
 
 `targets/dnrcanary/` is a different kind of target: a deliberately

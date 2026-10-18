@@ -50,28 +50,30 @@ Use when no application owner is available. Point it at a checkout and,
 optionally, a list of past vulnerabilities:
 
 ```
-/threat-model bootstrap targets/drlibs
-/threat-model bootstrap targets/drlibs --vulns targets/drlibs/vulns.txt
+/threat-model bootstrap targets/solidity-canary
 ```
 
-Without `--vulns` the skill mines `git log`, `CHANGELOG`, and GitHub Security
-Advisories itself; with it, it ingests your supplied list first.
+The skill mines `git log`, `CHANGELOG`, and GitHub Security Advisories itself
+when no `--vulns` list is supplied (`solidity-canary` is a local-only canary
+with no upstream history to mine, so bootstrap mode falls back to reading the
+source directly — see `targets/solidity-canary/README.md` for its documented
+planted bugs if you want a `--vulns`-style seed list on a real target).
 
 The skill spawns a parallel research swarm (docs reader, surface mapper, asset
 finder, git-history miner, advisory fetcher, vuln-file parser), synthesizes
 their returns into the system-context / assets / entry-points sections,
 generalizes the collected vulns into threat classes, gap-fills with STRIDE for
 surfaces the vuln history didn't cover, and writes
-`targets/drlibs/THREAT_MODEL.md`. On small targets (<50 source files) it runs
-the same briefs sequentially instead of spawning.
+`targets/solidity-canary/THREAT_MODEL.md`. On small targets (<50 source files)
+it runs the same briefs sequentially instead of spawning.
 
 ### Interview (discover via owner conversation)
 
 Use when an application owner is in the session.
 
 ```
-/threat-model interview targets/alsa
-/threat-model interview targets/alsa --design-doc targets/alsa/README.md
+/threat-model interview targets/solidity-canary
+/threat-model interview targets/solidity-canary --design-doc targets/solidity-canary/README.md
 ```
 
 Without `--design-doc` the interview opens cold by asking the owner to
@@ -81,7 +83,7 @@ back for confirmation.
 The skill will walk the owner through the four questions ("what are we working
 on?", "what can go wrong?", "what are we going to do about it?", "did we do a
 good job?"), grounding answers in the code as it goes, and write
-`targets/alsa/THREAT_MODEL.md`.
+`targets/solidity-canary/THREAT_MODEL.md`.
 
 ### Bootstrap then Interview (bootstrap a draft, then refine via interview)
 
@@ -90,7 +92,7 @@ the draft unattended, then the interview spends owner time only on what the
 code couldn't answer.
 
 ```
-/threat-model bootstrap-then-interview targets/drlibs/
+/threat-model bootstrap-then-interview targets/solidity-canary/
 ```
 
 The interview will focus on the bootstrap's open questions instead of starting
@@ -98,7 +100,7 @@ cold. If the bootstrap already ran in an earlier session, seed the interview
 with its output instead of re-running it:
 
 ```
-/threat-model interview targets/drlibs/ --seed targets/drlibs/THREAT_MODEL.md
+/threat-model interview targets/solidity-canary/ --seed targets/solidity-canary/THREAT_MODEL.md
 ```
 
 ## Checkpointing and resume (bootstrap mode)
@@ -115,8 +117,8 @@ is scratch; add it to `.gitignore`.
 
 `<target-dir>/THREAT_MODEL.md` with seven sections: system context, assets,
 entry points & trust boundaries, threats (the table), deprioritized, open
-questions, provenance. See `schema.md` for the full contract; a worked
-example lives at `targets/drlibs/THREAT_MODEL.md`.
+questions, provenance. See `schema.md` for the full contract; run
+`/threat-model bootstrap targets/solidity-canary` for a worked example.
 
 ## Notes
 

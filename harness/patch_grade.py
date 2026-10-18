@@ -25,7 +25,7 @@ from dataclasses import replace
 from . import docker_ops, sandbox
 from .agent import parse_xml_tag, run_agent
 from .artifacts import CrashArtifact, PatchVerdict
-from .asan import project_frames
+from .finding_parser import has_failures, project_frames
 from .config import TargetConfig
 from .find import run_find
 from .prompts.patch_prompt import build_style_judge_prompt
@@ -61,10 +61,20 @@ async def grade_patch(
             f"target {target.name!r} has no build_command — patch grading "
             f"requires an in-container rebuild step (set it in config.yaml)"
         )
-    if crash.poc_path not in crash.reproduction_command:
+    if target.binary_path:
+        if crash.poc_path not in crash.reproduction_command:
+            raise ValueError(
+                f"poc_path {crash.poc_path!r} not in reproduction_command "
+                f"{crash.reproduction_command!r}"
+            )
+    elif not crash.poc_path.startswith(target.source_root.rstrip("/") + "/"):
+        # Source-based target (e.g. Solidity): same split as grade.py — the
+        # PoC is source code that must live at its original in-tree path for
+        # the build tool to find it, not a data file referenced by path in
+        # the command.
         raise ValueError(
-            f"poc_path {crash.poc_path!r} not in reproduction_command "
-            f"{crash.reproduction_command!r}"
+            f"poc_path {crash.poc_path!r} is not inside source_root "
+            f"{target.source_root!r}"
         )
 
     evidence: dict[str, str] = {}
@@ -148,7 +158,16 @@ async def grade_patch(
             await asyncio.to_thread(
                 docker_ops.write_file, container, "/tmp/poc.bin", crash.poc_bytes
             )
-            adapted = crash.reproduction_command.replace(crash.poc_path, "/tmp/poc.bin")
+            if target.binary_path:
+                adapted = crash.reproduction_command.replace(crash.poc_path, "/tmp/poc.bin")
+            else:
+                # Source-based target: write the PoC to its in-tree path too
+                # (same split as grade.py) and leave the command unchanged —
+                # it already references that path relative to source_root.
+                await asyncio.to_thread(
+                    docker_ops.write_file, container, crash.poc_path, crash.poc_bytes
+                )
+                adapted = crash.reproduction_command
             try:
                 rc, out, err = await asyncio.to_thread(
                     docker_ops.exec_sh, container, adapted, timeout=600
@@ -242,7 +261,7 @@ async def grade_patch(
 
 
 def _t1_passes(rc: int, stdout: str, stderr: str) -> bool:
-    return rc == 0 and "AddressSanitizer:" not in (stdout + stderr)
+    return rc == 0 and not has_failures(stdout + stderr)
 
 
 def _focus_hint(crash: CrashArtifact, diff_source_root: str | None = None) -> str:

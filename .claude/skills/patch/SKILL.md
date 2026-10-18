@@ -589,20 +589,20 @@ Wrote ./PATCHES/bug_NN/, ./PATCHES.md, ./PATCHES.json
 Static mode against the canary fixture:
 
 ```
-/vuln-scan targets/canary
-/triage VULN-FINDINGS.json --repo targets/canary --auto
-/patch TRIAGE.json --repo targets/canary --top 3
+/vuln-scan targets/solidity-canary --extra .claude/scan-extras-solidity.txt
+/triage VULN-FINDINGS.json --repo targets/solidity-canary --auto
+/patch TRIAGE.json --repo targets/solidity-canary --top 3
 ```
 
 Expected: three diffs under `PATCHES/bug_00..02/`, each
 `verified: "static_review_only"`, `review: ACCEPT`, style ≥ 7 for the
-planted overflow/UAF/format-string bugs.
+planted reentrancy/access-control/share-price bugs.
 
 Execution-verified mode against pipeline output:
 
 ```
-vuln-pipeline run drlibs --runs 3 --parallel --stream --model <m>
-/patch results/drlibs/<ts>/ --model <m>
+vuln-pipeline run solidity-canary --runs 3 --parallel --stream --model <m>
+/patch results/solidity-canary/<ts>/ --model <m>
 ```
 
 Expected: delegates to `vuln-pipeline patch`, surfaces

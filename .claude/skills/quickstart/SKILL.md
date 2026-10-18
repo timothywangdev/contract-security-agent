@@ -2,11 +2,11 @@
 name: quickstart
 description: >-
   The front door for this repo. With no argument: a 30-second
-  intro, then an offer to walk you through your first run on the canary
-  target. With a question: answers it from this repo's own docs and source,
-  cites where it looked, and hands you the next command. Use for "how do
-  I…", "why does…", "where is…", "can this…", or just "/quickstart" to get
-  oriented.
+  intro, then an offer to walk you through your first run on the
+  solidity-canary target. With a question: answers it from this repo's own
+  docs and source, cites where it looked, and hands you the next command. Use
+  for "how do I…", "why does…", "where is…", "can this…", or just
+  "/quickstart" to get oriented.
 argument-hint: "[question]   (blank = 30-sec intro)"
 allowed-tools:
   - Read
@@ -40,12 +40,12 @@ Say roughly:
 > The ramp-up:
 >
 > | Day 1   | Threat-model + first static scan + triage |
-> | Day 2   | Run the reference pipeline (C/C++)              |
+> | Day 2   | Run the reference pipeline (Solidity/Foundry)   |
 > | Day 3-4 | Customize it for your stack               |
 > | Week 2  | Autonomous scanning, triage, and patching |
 >
-> Day-1 goal: threat-model, scan, and triage the bundled canary target.
-> Most teams get there before lunch.
+> Day-1 goal: threat-model, scan, and triage the bundled solidity-canary
+> target. Most teams get there before lunch.
 
 Remind them to `export CLAUDE_CODE_SUBAGENT_MODEL=<model-id>` so subagents
 use the same model as the session.
@@ -59,19 +59,19 @@ Then **AskUserQuestion** with three options:
 
 ### Guided first run
 
-Runs the three Step-1 skills on `targets/canary`, pausing after each to show
-what landed on disk. These only read/write files in the repo; no sandbox
-needed.
+Runs the three Step-1 skills on `targets/solidity-canary`, pausing after each
+to show what landed on disk. These only read/write files in the repo; no
+sandbox needed.
 
-1. `/threat-model bootstrap targets/canary` via Task. When done, open
-   `THREAT_MODEL.md`, show the focus areas, explain in 2-3 sentences how
+1. `/threat-model bootstrap targets/solidity-canary` via Task. When done,
+   open `THREAT_MODEL.md`, show the focus areas, explain in 2-3 sentences how
    this steers the scan.
-2. `/vuln-scan targets/canary` via Task. When done, open
-   `targets/canary/VULN-FINDINGS.md`, summarize the count and top 2-3
-   findings, point at `VULN-FINDINGS.json`.
-3. `/triage targets/canary/VULN-FINDINGS.json` via Task. When done, open
-   `TRIAGE.md`, explain what changed vs. raw findings (verified, deduped,
-   re-ranked).
+2. `/vuln-scan targets/solidity-canary --extra .claude/scan-extras-solidity.txt`
+   via Task. When done, open `targets/solidity-canary/VULN-FINDINGS.md`,
+   summarize the count and top 2-3 findings, point at `VULN-FINDINGS.json`.
+3. `/triage targets/solidity-canary/VULN-FINDINGS.json` via Task. When done,
+   open `TRIAGE.md`, explain what changed vs. raw findings (verified,
+   deduped, re-ranked).
 
 Pause for the operator between each (AskUserQuestion); don't barrel through.
 Close with a one-line recap of the three artifacts on disk, then point at

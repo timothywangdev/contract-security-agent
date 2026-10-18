@@ -118,8 +118,8 @@ def test_vuln_pipeline_refuses_dnr_target():
 
 
 def test_canary_still_loads():
-    cfg = TargetConfig.load(REPO / "targets" / "canary")
-    assert cfg.image_tag == "vuln-pipeline-canary:latest"
+    cfg = TargetConfig.load(REPO / "targets" / "solidity-canary")
+    assert cfg.image_tag == "vuln-pipeline-solidity-canary:latest"
 
 
 def test_grade_passes_complete_submission():

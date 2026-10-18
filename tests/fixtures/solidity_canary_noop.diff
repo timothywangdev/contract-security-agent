@@ -1,0 +1,17 @@
+diff --git a/src/ReentrancyVault.sol b/src/ReentrancyVault.sol
+index 14e06d6..1d92fa8 100644
+--- a/src/ReentrancyVault.sol
++++ b/src/ReentrancyVault.sol
+@@ -1,9 +1,9 @@
+ // SPDX-License-Identifier: MIT
+ pragma solidity 0.8.26;
+ 
+-/// Bug: external call happens before the credit is debited, and the debit is
+-/// `unchecked` — a reentrant `withdraw` call drains more than the caller
+-/// deposited.
++// Note: external call happens before the credit is debited, and the debit
++// is `unchecked` — a reentrant `withdraw` call drains more than the caller
++// deposited.
+ contract ReentrancyVault {
+     mapping(address => uint256) public credits;
+ 

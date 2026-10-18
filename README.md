@@ -1,15 +1,23 @@
-# Defending Code Reference Harness
+# Contract Security Agent
 
-A reference implementation for autonomous vulnerability discovery and
-remediation with Claude, based on our learnings from [partnering with security
-teams at several organizations](https://www.anthropic.com/glasswing)
-since launching Claude Mythos Preview. For a write up of these learnings along with
-best practices, see the [accompanying blog post](https://claude.com/blog/using-llms-to-secure-source-code)
+A fork of Anthropic's [Defending Code Reference Harness](https://github.com/anthropics/defending-code-reference-harness)
+— a reference implementation for autonomous vulnerability discovery and
+remediation with Claude — retargeted (via its own `/customize` skill) from
+C/C++ memory-safety bugs to **Solidity/Foundry smart-contract
+vulnerabilities**: reentrancy, access control, and accounting/share-price
+manipulation. See `docs/product-plan/` for the retarget's planning docs and
+rationale, and `CLAUDE.md` for what changed vs. upstream.
+
+The rest of this README is upstream's own documentation, with examples
+updated to point at this fork's `solidity-canary` target instead of its
+original C/C++ demo targets. For a write up of the methodology this fork
+builds on, see the [accompanying blog post](https://claude.com/blog/using-llms-to-secure-source-code)
 (also available in [`blog-post.md`](docs/blog-post.md)). For a lightweight SDK-only 
 walkthrough of the same recon → find → triage → report → patch loop, see the 
 [companion cookbook](https://platform.claude.com/cookbook/claude-agent-sdk-06-the-vulnerability-detection-agent).
 
-This repo is not maintained and is not accepting contributions.
+Upstream is not maintained and is not accepting contributions; the same
+applies to this fork.
 
 > 🔒 **Want a managed option?** Anthropic offers
 > [Claude Security](https://claude.com/product/claude-security), a hosted product
@@ -27,66 +35,88 @@ This repo is not maintained and is not accepting contributions.
 
 ## Contents
 
+- **`contract_security_agent/`** (`csa` CLI) — the fastest path to audit
+  your own contracts: one command, no `targets/` setup, no customization.
+  `csa audit <path-to-foundry-project>` snapshots an arbitrary local Foundry
+  project and audits it with Foundry/Slither/Halmos, producing a
+  Markdown/JSON report with reproducible evidence. See `CLAUDE.md` for the
+  full command reference.
 - **Claude Code skills**: `/quickstart`, `/threat-model`, `/vuln-scan`,
-  `/triage`, `/patch`, `/customize`: interactive scoping, scanning, triage,
-  and patching. Open this repo in Claude Code and run `/quickstart` to get
-  oriented.
-- **`harness/`**: the autonomous reference pipeline (recon → find → verify
-  → report → patch), configured for finding C/C++ memory vulnerabilities
-  using Docker and ASAN. This harness is a **reference, not a product**. 
-  The general shape, prompts, and sandboxing are reusable, but the harness
-  will not work on every codebase out of the box. Run `/customize` to port it 
-  to your language, detector, or vuln class.
-- **Detection & response**: the `/dnr-hunt` and `/dnr-respond` skills plus
-  `dnr_harness/`, their autonomous mirror (`dnr-pipeline`). Everything else
-  in this repo is preventive; this track assumes an attacker is already in
-  the logs — hunt the corpus, scope the damage, and propose a response.
-  Demo target: `targets/dnrcanary/`. See
-  [docs/detection-response.md](docs/detection-response.md).
+  `/triage`, `/patch`: interactive scoping, scanning, triage, and patching —
+  zero setup, read/write-only. Open this repo in Claude Code and run
+  `/quickstart` to get oriented.
+- **`harness/`** (`vuln-pipeline` CLI) — the autonomous reference pipeline
+  (recon → find → verify → report → patch), retargeted via `/customize` from
+  its original C/C++ memory-safety domain to find Solidity/Foundry
+  smart-contract vulnerabilities (reentrancy, access control,
+  accounting/share-price manipulation) — see `docs/product-plan/` for the
+  retarget rationale. Needs Docker + a gVisor sandbox, since it executes
+  target code.
 
 > ⚠️ **Security:** `/quickstart`, `/threat-model`, `/vuln-scan`, and `/triage`
 > only read and write files. Running `/patch` on static findings (`TRIAGE.json`
-> or `VULN-FINDINGS.json`) is likewise read- and write-only. `/customize` edits
-> the harness code and runs validation commands. Any of these skills are safe to
-> run unsandboxed, as long as you review and approve each tool use in Claude Code.
-> The autonomous pipelines (`vuln-pipeline`, `dnr-pipeline`, and `/patch` on
-> pipeline results) **execute target code**, so they refuse to run outside of
-> a gVisor sandbox
-> unless explicitly overridden. To get set up, run `scripts/setup_sandbox.sh` once,
-> then invoke the pipeline via `bin/vp-sandboxed`. The detection & response
-> skills (`/dnr-hunt`, `/dnr-respond`) additionally run the demo app on
-> `127.0.0.1` to verify PoCs. See [docs/security.md](docs/security.md)
-> and [docs/agent-sandbox.md](docs/agent-sandbox.md) for more details.
+> or `VULN-FINDINGS.json`) is likewise read- and write-only. Any of these
+> skills are safe to run unsandboxed, as long as you review and approve each
+> tool use in Claude Code. `csa` and the autonomous `vuln-pipeline` **execute
+> target code**: `csa` does so in a plain Docker container with no network
+> and no credentials; `vuln-pipeline` refuses to run outside a gVisor sandbox
+> unless explicitly overridden. To set the sandbox up, run
+> `scripts/setup_sandbox.sh` once, then invoke the pipeline via
+> `bin/vp-sandboxed`. See [docs/security.md](docs/security.md) and
+> [docs/agent-sandbox.md](docs/agent-sandbox.md) for more details.
+
+## Which path do I want?
+
+```mermaid
+flowchart TD
+    A["I have Solidity contracts to audit"] --> B{"How much setup?"}
+    B -->|"None — one command"| C["csa audit &lt;path&gt;"]
+    B -->|"Full pipeline — parallel autonomous runs"| D["Add targets/&lt;name&gt;/<br/>(Dockerfile + config.yaml)"]
+    C --> E["Markdown/JSON report<br/>+ reproducible evidence"]
+    D --> F["vuln-pipeline run &lt;name&gt;"]
+    F --> G["recon → find → verify → report → patch<br/>(see Step 2 below)"]
+```
+
+`csa` needs no `targets/` setup and no customization — the fastest way to
+try this on a real project. `vuln-pipeline` needs a one-time target
+directory but scales to many parallel agents and gives you dedup/triage
+across runs. Both audit the same way: Foundry build, Slither static
+analysis, Halmos bounded formal checks, and (for `vuln-pipeline`) an
+agent that writes and verifies exploit tests.
 
 ## Getting Started
 
 ```bash
-git clone https://github.com/anthropics/defending-code-reference-harness
-cd defending-code-reference-harness
+git clone https://github.com/timothywangdev/contract-security-agent
+cd contract-security-agent
 claude
 
-# 30-sec intro + guided first run on the canary target
+# 30-sec intro + guided first run on the solidity-canary target
 > /quickstart
 
-> /quickstart how do I port the pipeline to Java?
+> /quickstart how do I audit my own contracts?
 > /quickstart how do I triage all these bugs?
 ```
 
 ## Further Reading
 
-- [**Blog Post**](docs/blog-post.md) · The accompanying blog post with learnings + best practices
 - [**Pipeline**](docs/pipeline.md) · How it works: diagram, stages, CLI flags
 - [**Security**](docs/security.md) · Sandboxing, what not to mount
 - [**Agent sandbox**](docs/agent-sandbox.md) · gVisor isolation + egress allowlist for every agent
+- [**Threat model**](docs/threat-model.md) · Why a threat model cuts false positives, and the `/threat-model` skill
+- [**Patching**](docs/patching.md) · Generate and verify fixes for verified findings
+- [**Troubleshooting**](docs/troubleshooting.md) · Duplicates, rate limits, subagent model pinning
 - [**Best practices**](docs/best-practices.md) · Field-tested principles: verification, severity, iteration, large codebases
 - [**Prompting**](docs/prompting.md) · Prompting the model for defensive security tasks
-- [**Threat model**](docs/threat-model.md) · Why a threat model cuts false positives, and the `/threat-model` skill
-- [**Detection & response**](docs/detection-response.md) · Hunting an attacker already in the logs; the D&R skills and pipeline
-- [**Customize**](docs/customizing.md) · Port to my stack; which files change and why
-- [**Patching**](docs/patching.md) · Generate and verify fixes for verified crashes
-- [**Other use cases**](docs/other-use-cases.md) · Binary analysis, embedded, bug chains, threat intel
-- [**Troubleshooting**](docs/troubleshooting.md) · Duplicates, rate limits, subagent model pinning
+- [**Customize**](docs/customizing.md) · How this fork itself was retargeted to Solidity, and how to port it again
 - [**Safeguards**](https://support.claude.com/en/articles/14604842-real-time-cyber-safeguards-on-claude) · Block for dangerous cyber work
+
+Not relevant to a smart-contract audit, but still in this repo (upstream
+content, unmodified): [docs/detection-response.md](docs/detection-response.md)
+(an unrelated log-hunting/incident-response track, `/dnr-hunt` + `/dnr-respond`),
+[docs/other-use-cases.md](docs/other-use-cases.md) (binary analysis, embedded,
+bug chains), and [docs/blog-post.md](docs/blog-post.md) (the original
+C/C++-oriented methodology write-up this fork's workflow is based on).
 
 ---
 
@@ -102,10 +132,9 @@ pace based on what we've seen.
 |                                                                                     |              |                                                              |
 |-------------------------------------------------------------------------------------|--------------|--------------------------------------------------------------|
 | [Step 1](#step-1-day-1-build-a-threat-model-and-run-your-first-static-scan--triage) | **Day 1**    | Build a threat model and run your first static scan + triage |
-| [Step 2](#step-2-day-2-run-the-reference-pipeline-on-a-cc-library)                  | **Day 2**    | Run the reference pipeline on a C/C++ library                | 
-| [Step 3](#step-3-days-3-5-customize-the-pipeline-for-your-target)                   | **Days 3-5** | Customize the pipeline for your target                       |
+| [Step 2](#step-2-day-2-run-the-reference-pipeline-on-a-solidityfoundry-contract)    | **Day 2**    | Run the reference pipeline on a Solidity/Foundry contract     | 
+| [Step 3](#step-3-days-3-5-point-it-at-your-own-contracts)                           | **Days 3-5** | Point it at your own contracts                                |
 | [Step 4](#step-4-week-2-start-autonomous-scanning-triage-and-patching)              | **Week 2**   | Start autonomous scanning, triage, and patching              | 
-| [Step 5](#step-5-optional-detection--response)                                      | **Optional** | Hunt a planted campaign in logs (detection & response)       | 
 
 ### Step 1 (Day 1): Build a threat model and run your first static scan + triage
 
@@ -127,16 +156,16 @@ claude
 > /quickstart
 
 # 1. Build a threat model (aim before you shoot)
-> /threat-model bootstrap targets/canary
+> /threat-model bootstrap targets/solidity-canary
 
 # 2. Run a static scan, scoped by that threat model
-> /vuln-scan targets/canary
+> /vuln-scan targets/solidity-canary --extra .claude/scan-extras-solidity.txt
 
 # 3. Verify, dedupe, and rank what came back
-> /triage targets/canary/VULN-FINDINGS.json
+> /triage targets/solidity-canary/VULN-FINDINGS.json
 
 # 4. Generate candidate fixes for the verified findings
-> /patch ./TRIAGE.json --repo targets/canary
+> /patch ./TRIAGE.json --repo targets/solidity-canary
 ```
 
 This flow produces `THREAT_MODEL.md`, `VULN-FINDINGS.{json,md}`, 
@@ -147,20 +176,22 @@ review of the source (nothing is built or run), so expect more false positives o
 any non-canary targets. In Step 2, you'll produce *execution-verified* findings.
 
 > **Note:** on the canary target, `/triage` may dismiss the scan's findings
-> as false positives. `entry.c` announces itself as deliberately vulnerable
-> demo code, and `/triage` correctly excludes bugs in test / fixture code.
-> To see the full confirm / dedupe / false positive flow, run it on the
-> curated fixture instead (`/triage .claude/skills/triage/fixtures/canary-findings.json
-> --repo targets/canary`) or point the Step 1 skills at your own code.
+> as false positives, since `known_bugs` is deliberately left empty so it stays
+> a real discovery exercise rather than an answer key. Point the Step 1 skills
+> at your own Solidity project (or run `csa audit <path>` — see
+> `contract_security_agent/`, this fork's standalone one-command audit CLI —
+> for an execution-verified alternative that needs no `targets/` authoring at
+> all) to see the full confirm/dedupe/false-positive flow on real findings.
 
-### Step 2 (Day 2): Run the reference pipeline on a C/C++ library
+### Step 2 (Day 2): Run the reference pipeline on a Solidity/Foundry contract
 
 On Day 2, you'll move from interactive skills to your first autonomous
 run using the reference pipeline. You'll run the full recon → find → 
-verify → report loop in your environment on a known-vulnerable open-source
-library, then generate a candidate patch for what it finds. You'll finish
-with a set of reproducible crashes, exploitability reports, and candidate patches,
-along with a feel for how the pipeline works.
+verify → report loop in your environment on the bundled Solidity canary
+(three planted bugs: reentrancy, missing access control, share-price
+manipulation), then generate a candidate patch for what it finds. You'll
+finish with a set of reproducible findings, exploitability reports, and
+candidate patches, along with a feel for how the pipeline works.
 
 Running the pipeline is simple:
 
@@ -171,17 +202,17 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 export ANTHROPIC_API_KEY=sk-ant-...   # or CLAUDE_CODE_OAUTH_TOKEN, or Bedrock — see docs/agent-sandbox.md
 
 # Run the recon → find → verify → report loop
-bin/vp-sandboxed run drlibs --model <model-id> --runs 3 --parallel --stream --auto-focus
+bin/vp-sandboxed run solidity-canary --model <model-id> --runs 3 --parallel --stream --auto-focus
 # Generate a candidate patch for each finding
-bin/vp-sandboxed patch results/drlibs/<timestamp>/ --model <model-id>
+bin/vp-sandboxed patch results/solidity-canary/<timestamp>/ --model <model-id>
 
 # Or, ask Claude Code to launch the pipeline and watch the run for you
 claude
-> run the pipeline on drlibs and explain findings as they come
+> run the pipeline on solidity-canary and explain findings as they come
 ```
 
-Results from the loop land in a `results/drlibs/<timestamp>/` directory. With 
-the `--stream` flag, the first report will appear in minutes under `reports/bug_NN/`.
+Results from the loop land in a `results/solidity-canary/<timestamp>/` directory.
+With the `--stream` flag, the first report will appear in minutes under `reports/bug_NN/`.
 
 > ⚠️ **`run` spawns autonomous agents.** The pipeline runs each agent
 > inside a gVisor container with egress restricted to the Claude API.
@@ -189,102 +220,100 @@ the `--stream` flag, the first report will appear in minutes under `reports/bug_
 > overridden. For more information, see [docs/security.md](docs/security.md)
 > and [docs/agent-sandbox.md](docs/agent-sandbox.md).
 
-Under the hood, the pipeline walks through seven stages:
+Under the hood, the pipeline walks through seven stages, each a fresh,
+isolated container — only small artifacts (a focus list, a PoC test, a diff)
+cross between them:
 
-1. **Build**: Compiles the target into a Docker image with ASAN (the memory
-error detector for C and C++). The pipeline builds this image automatically
-on first run using the target's `Dockerfile`.
-2. **Recon**: A lightweight agent reads the source inside a network-isolated
-container and proposes a partition, i.e., *"here are N distinct input-parsing 
-subsystems worth attacking separately"*, so that parallel find agents explore
-different areas instead of converging on the same bug. Without the `--auto-focus`
-flag, the pipeline uses the `focus_areas` list from the target's `config.yaml`.
-3. **Find**: N agents run in parallel, each in its own isolated container.
-Each agent reads the source, crafts malformed inputs, and runs the ASAN
-binary until a given input produces a crash 3 out of 3 times.
-4. **Verify**: A separate grader agent reproduces each crash in a fresh
-container that the find agent hasn't touched. The only thing that crosses over
-from the find agent to the grader is the proof of concept it produced.
-5. **Dedupe**: A judge agent compares verified crashes against bugs already
-reported and decides whether each is a new bug, a better example of a known
-bug, or a duplicate to skip.
-6. **Report**: A report agent writes a structured exploitability analysis per
-unique bug, including details on primitive class, reachability, escalation
-path, and severity.
-7. **Patch** (the separate patch command above): A patch agent writes a proposed
-fix, and a grader agent confirms that the new code builds, that the original 
-proof of concept input no longer crashes, that the target's test suite still 
-passes, and that a fresh find agent can't find a way around the fix.
+```mermaid
+flowchart TD
+    Build["1. Build<br/>Foundry+Slither+Halmos image<br/>from the target's Dockerfile"]
+    Recon["2. Recon<br/>partition into focus areas<br/>e.g. accounting vs. staking vs. governance"]
+    Find["3. Find (N parallel agents)<br/>write a Foundry exploit test or<br/>Halmos property; reproduce 3/3"]
+    Verify["4. Verify<br/>fresh-container grader<br/>re-runs the PoC independently"]
+    Dedupe["5. Dedupe<br/>judge agent: new / better-dup / skip"]
+    Report["6. Report<br/>primitive, reachability, state impact,<br/>escalation path, severity"]
+    Patch["7. Patch<br/>fix → rebuild → PoC gone →<br/>tests pass → re-attack fails"]
+    Build --> Recon --> Find --> Verify --> Dedupe --> Report --> Patch
+```
+
+Only the PoC bytes cross from Find into Verify — the grader never trusts the
+find-agent's own claim. Without `--auto-focus`, stage 2 is skipped and the
+pipeline uses the `focus_areas` list from the target's `config.yaml` instead.
+`patch` is a separate command (shown above) rather than automatic, so you can
+read the reports and decide what's worth fixing first.
 
 For more details, see [docs/pipeline.md](docs/pipeline.md).
 
-### Step 3 (Days 3-5): Customize the pipeline for your target
+### Step 3 (Days 3-5): Point it at your own contracts
 
-On Days 3-5, you'll customize the harness for your own target. First, you'll
-point the Step 1 skills at your code, then you'll use `/customize` to port the
-pipeline to your stack. By the end of the week, you'll have a `targets/<your-service>/`
-directory that the pipeline can run against, validated with a single smoke run
-of the pipeline, and ready to scale up in Step 4.
+This fork is already customized for Solidity — you don't need to run
+`/customize` again to audit your own contracts. Two ways in, depending on
+how much setup you want:
 
-While the reference pipeline is designed for finding memory vulnerabilities in C and C++
-code, its shape is generic. Porting it to a new vuln class or language just means
-answering the following questions for your target stack:
+**No setup at all — `csa`.** Point the standalone audit CLI at any local
+Foundry project; it builds no `targets/` directory and needs no pipeline
+code changes:
 
-| Question                                | C/C++ Reference                   | Your target (examples)                         |
-|-----------------------------------------|-----------------------------------|------------------------------------------------|
-| What signals a finding?                 | ASAN crash signature              | exception / canary file / DNS callback         |
-| What does a proof of concept look like? | crashing input file               | HTTP request sequence / tx list / test harness |
-| How is the target built and run?        | `Dockerfile` (using clang + ASAN) | your language's build in a container           |
+```bash
+csa audit ~/code/my-protocol \
+  --requirements ~/code/my-protocol/requirements.json   # optional: your reviewed intent/assumptions
+```
 
-Before customizing, point the Step 1 skills at your own code. As a reminder,
-they're read- and write-only, so they can run unsandboxed.
+**Full pipeline, scales to parallel autonomous runs — add a target.** A
+target is just a directory with a `Dockerfile` (Foundry + Slither + Halmos —
+copy `targets/solidity-canary/Dockerfile` as a starting point) and a
+`config.yaml` (`source_root`, `build_command: forge build --offline`,
+`test_command: forge test --offline`, `attack_surface`). No `binary_path`
+needed — that field is only for the upstream C/C++ shape. See
+`targets/README.md`'s Solidity section for the exact schema. No pipeline
+code changes either way.
+
+Before either, point the Step 1 skills at your own code — they're
+read/write-only, so they can run unsandboxed:
 
 ```bash
 claude
 
-> /quickstart how do I customize this for ~/code/my-service?
+> /quickstart how do I audit ~/code/my-protocol?
 
-> /threat-model bootstrap-then-interview ~/code/my-service
-> /vuln-scan ~/code/my-service
-> /triage ~/code/my-service/VULN-FINDINGS.json --repo ~/code/my-service
+> /threat-model bootstrap-then-interview ~/code/my-protocol
+> /vuln-scan ~/code/my-protocol --extra .claude/scan-extras-solidity.txt
+> /triage ~/code/my-protocol/VULN-FINDINGS.json --repo ~/code/my-protocol
 ```
 
-Then, use the artifacts produced by those skills in the `/customize` skill, 
-which modifies the harness for your codebase.
+Once you've added `targets/my-protocol/`, validate it with a smoke run
+before scaling up:
 
 ```bash
-> /customize use ~/code/my-service/{THREAT_MODEL.md,VULN-FINDINGS.json} and ./TRIAGE.md
+bin/vp-sandboxed run my-protocol --model <model-id> --runs 1
 ```
 
-When `/customize` is done, you'll have a `targets/my-service/` directory 
-set up. Validate it with a smoke run of the pipeline before scaling up.
-
-```bash
-bin/vp-sandboxed run my-service --model <model-id> --runs 1
-```
-
-For more details, see [docs/customizing.md](docs/customizing.md).
+If you instead want to port this pipeline to a different chain's VM, a
+non-EVM contract language, or an entirely different vuln class, that's what
+`/customize` is for — see [docs/customizing.md](docs/customizing.md) and
+`.claude/skills/customize/SKILL.md` for how this fork itself was retargeted
+from C/C++ to Solidity as a worked example.
 
 ### Step 4 (Week 2): Start autonomous scanning, triage, and patching
 
-In Week 2, you'll use the pipeline you customized in Step 3 on your own
-targets, adding an *outer* loop to the inner pipeline loop - run multiple
+In Week 2, you'll use the target you set up in Step 3 on your own
+contracts, adding an *outer* loop to the inner pipeline loop - run multiple
 pipeline scans, triage the findings from across those runs, patch based
 on prioritization, and repeat.
 
 ```bash
 # Scan - run a wave of parallel runs against your target
-bin/vp-sandboxed run my-service --model <model-id> --runs 5 --parallel --stream --auto-focus
+bin/vp-sandboxed run my-protocol --model <model-id> --runs 5 --parallel --stream --auto-focus
 
 # Triage - dedupe and rank every finding across all waves using your threat model
-> /triage results/my-service/ --repo ~/code/my-service --auto --votes 5
+> /triage results/my-protocol/ --repo ~/code/my-protocol --auto --votes 5
 
 # Patch - generate and validate fixes, starting with what triage ranked the highest
-> /patch results/my-service/<timestamp>/ --model <model-id>
+> /patch results/my-protocol/<timestamp>/ --model <model-id>
 ```
 
 > ⚠️ Follow the same sandboxing guidelines as in 
-> [Step 2](#step-2-day-2-run-the-reference-pipeline-on-a-cc-library)
+> [Step 2](#step-2-day-2-run-the-reference-pipeline-on-a-solidityfoundry-contract)
 
 A given pipeline run already verifies and deduplicates its own findings.
 `/triage` works across many pipeline runs. When pointed at the `results/`
@@ -310,36 +339,13 @@ bottlenecks, and you should budget real engineering time for them.
 For more details, see [docs/triage.md](docs/triage.md) and 
 [docs/patching.md](docs/patching.md).
 
-### Step 5 (Optional): Detection & response
+---
 
-Everything above is about finding vulnerabilities before an attacker does.
-The detection & response track is an example of how you may use Claude if an
-attacker is already in your systems and shows up in your logs: find them,
-scope the damage, and propose the response.
-
-The demo target is `targets/dnrcanary`, a deliberately vulnerable web app
-with a planted attack campaign hiding in a week of generated logs.
-
-```bash
-pip install flask pyyaml               # flask runs the app; pyyaml runs the grader
-python3 targets/dnrcanary/generate_logs.py --seed 42   # required first — logs are local-only
-
-> /dnr-hunt                       # no alert in hand: hunt the corpus
-> /dnr-respond INC-1              # lead in hand: verdict, blast radius, proposed plan
-python3 targets/dnrcanary/grade.py results/dnrcanary/<ts>/INCIDENTS.json   # self-score against ground truth
-```
-
-The same exercise also runs unattended, mirroring how `vuln-pipeline`
-mirrors the interactive scanning skills:
-
-```bash
-bin/vp-sandboxed dnr-pipeline run targets/dnrcanary --model <model-id>
-```
-
-Confirmed vulnerabilities flow into the same `/triage` → `/patch` loop as
-the static track.
-
-→ Deeper: [docs/detection-response.md](docs/detection-response.md)
+This repo also ships an unrelated detection & response track (`/dnr-hunt`,
+`/dnr-respond`, `targets/dnrcanary/`) — hunting an attacker already in your
+logs, rather than auditing contracts before deployment. Not covered here
+since it isn't part of a smart-contract audit workflow; see
+[docs/detection-response.md](docs/detection-response.md) if you want it.
 
 ## Looking Forward
 

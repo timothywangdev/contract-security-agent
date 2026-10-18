@@ -9,6 +9,7 @@ tests/test_patch_grade_e2e.py (canary only).
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -134,12 +135,22 @@ def test_t1_passes_clean_exit():
     assert _t1_passes(0, "alpha: first=65\n", "")
 
 
-def test_t1_fails_on_asan_in_stderr():
-    assert not _t1_passes(0, "", "==1==ERROR: AddressSanitizer: heap-buffer-overflow\n")
+def test_t1_fails_on_remaining_forge_failure():
+    # The original exploit test still fails after the "fix" — T1 must fail.
+    output = json.dumps({"test/audit/X.t.sol:T": {"test_results": {
+        "test_Exploit_Reentrancy_X()": {"status": "Failure", "reason": "still broken"},
+    }}})
+    assert not _t1_passes(0, output, "")
 
 
-def test_t1_fails_on_asan_in_stdout():
-    assert not _t1_passes(0, "SUMMARY: AddressSanitizer: SEGV\n", "")
+def test_t1_fails_on_remaining_halmos_counterexample():
+    output = json.dumps({
+        "test_results": {"test/audit/X.t.sol": [
+            {"name": "test_Exploit_X", "exitcode": 1, "models": [{"is_valid": True}]},
+        ]},
+        "exitcode": 1,
+    })
+    assert not _t1_passes(0, output, "")
 
 
 def test_t1_fails_on_nonzero_exit():
