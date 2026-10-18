@@ -1,0 +1,11 @@
+{
+  "model": "sonnet",
+  "max_budget_usd": 2.0,
+  "max_turns": 3,
+  "model_timeout_seconds": 180,
+  "tool_timeout_seconds": 90,
+  "formal_timeout_seconds": 60,
+  "audit_timeout_seconds": 600,
+  "image": "contract-security-agent-tools:dev"
+}
+

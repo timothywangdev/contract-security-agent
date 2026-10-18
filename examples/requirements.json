@@ -1,0 +1,13 @@
+[
+  {
+    "id": "withdrawal-entitlement",
+    "text": "An account's cumulative withdrawals must not exceed its cumulative deposits, including across external callbacks. Other accounts' deposits must remain available to them.",
+    "reviewed": true,
+    "assumptions": [
+      "ETH deposits have no fees or yield.",
+      "A depositor may be an untrusted contract that receives ETH.",
+      "The attacker has no privileged role and cannot mutate contract storage directly."
+    ]
+  }
+]
+

@@ -1,0 +1,9 @@
+{
+  "requirement_id": "withdrawal-entitlement",
+  "title": "Cumulative withdrawals respect a depositor's entitlement",
+  "test_pattern": "test_Safety_WithdrawalEntitlement",
+  "expected_vulnerable_status": "failed",
+  "expected_fixed_status": "passed",
+  "expected_failure": "audit: safety violation"
+}
+

@@ -1,0 +1,25 @@
+Contract Security Agent
+
+This repository is a fork of Anthropic's Defending Code Reference Harness
+("vuln-pipeline"), Copyright 2026 Anthropic PBC, licensed under the Apache
+License, Version 2.0.
+
+Upstream: https://github.com/anthropics/defending-code-reference-harness
+Forked from revision: d3bea6b5793b5f3d59a75ebe69a58efa88383145
+
+The `harness/`, `dnr_harness/`, `targets/` (excluding Solidity-specific
+additions), `.claude/skills/`, `scripts/`, `bin/`, and `docs/` directories
+retain their original upstream authorship and are modified in place for
+Solidity/Foundry smart-contract security auditing, per upstream's own
+documented customization workflow (`.claude/skills/customize/`).
+
+The `contract_security_agent/` package, `docker/Dockerfile.tools`, and the
+`examples/` fixtures are original additions, Copyright 2026 Contract
+Security Agent contributors, also licensed under the Apache License,
+Version 2.0, provided as a standalone one-command audit CLI for arbitrary
+Foundry projects, usable independently of the forked harness's fixed-target
+model.
+
+This project also integrates with Anthropic's scone-bench
+(https://github.com/anthropics/scone-bench, Apache-2.0) as an optional
+real-world validation benchmark; see docs/product-plan/ for background.

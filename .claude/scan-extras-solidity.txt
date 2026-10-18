@@ -1,0 +1,44 @@
+## Solidity / Foundry smart-contract bug classes (append to vuln-scan brief)
+
+In addition to the general categories above, specifically check for:
+
+- **Reentrancy**: external calls (`.call`, `.send`, `.transfer`, token transfers to
+  arbitrary/untrusted addresses) that happen before state is updated, including
+  cross-function and read-only reentrancy. Flag `unchecked` blocks that remove
+  revert-on-underflow protection around a balance/credit decrement that follows
+  an external call.
+- **Access control**: missing or incorrect `onlyOwner`/role checks on privileged
+  functions (pausing, upgrades, parameter changes, minting, withdrawals of
+  protocol funds); `tx.origin` used for authorization; missing checks on
+  initializer functions (can be called by anyone, or called twice).
+- **Accounting / share-price manipulation**: ERC-4626-style vaults where a
+  first depositor or a donation/direct-transfer to the contract can skew the
+  share price; rounding direction that favors the attacker over repeated
+  operations; reward-per-token accounting that double-counts or under-counts
+  across deposit/claim/withdraw sequences; share dilution from unexpected
+  token behavior (rebasing, fee-on-transfer, fewer tokens received than
+  requested).
+- **Oracle manipulation**: price/TWAP reads that can be manipulated within a
+  single transaction (flash-loan-funded spot-price reads, thin-liquidity pools
+  used as the sole price source, missing staleness/deviation checks on
+  external price feeds).
+- **Unchecked external calls and return values**: low-level `.call`/`.delegatecall`
+  whose success is not checked; ERC-20 `transfer`/`transferFrom` return values
+  ignored (some tokens return `false` instead of reverting).
+- **Delegatecall and storage-layout risk**: `delegatecall` into
+  untrusted/upgradable implementations where storage slots can collide or be
+  corrupted by the callee.
+- **Integer/rounding edge cases**: division before multiplication, truncation
+  that is exploitable via repeated small operations, off-by-one in loop bounds
+  over user-controlled arrays (gas griefing / DoS).
+- **Front-running / MEV**: functions whose outcome depends on the order of
+  transactions in a block without a commit-reveal or slippage/deadline
+  protection.
+- **Signature replay**: ECDSA signatures accepted without a nonce, chain ID,
+  or domain separator, enabling cross-contract or repeat replay.
+
+Do not flag a finding from static reading alone as confirmed — reaching a
+checked, replay-verified finding (reproduced against a fresh snapshot, ideally
+with an independent trusted check) is what `csa audit` / the forked
+`vuln-pipeline` are for. This scan is for triage-worthy leads, not final
+verdicts.
