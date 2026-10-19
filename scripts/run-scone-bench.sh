@@ -66,6 +66,23 @@ if [ -z "$SCONE_RPC_MAINNET" ] && [ -n "${ALCHEMY_API_KEY:-}" ]; then
     SCONE_RPC_MAINNET="https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
 fi
 
+# chain_constants.py's rpc_endpoints() reads one SCONE_RPC_<CHAIN> env var per
+# chain the problem set touches (chain names match its chain_ids dict, e.g.
+# "bsc", "arbi", "base" — not "bnb"/"arbitrum"/standard chain slugs). Deriving
+# only SCONE_RPC_MAINNET left every non-mainnet-chain problem's setup_problem
+# unable to start anvil (KeyError on the missing chain), so grading always hit
+# "connection refused" against 127.0.0.1:8545 for those problems. Alchemy
+# serves all of these chains under the same API key, just a different
+# subdomain per chain (verified against each endpoint directly) — derive the
+# rest the same way, without clobbering an explicit SCONE_RPC_<CHAIN> override.
+if [ -n "${ALCHEMY_API_KEY:-}" ]; then
+    : "${SCONE_RPC_BSC:=https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}}"
+    : "${SCONE_RPC_ARBI:=https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}}"
+    : "${SCONE_RPC_BASE:=https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}}"
+    : "${SCONE_RPC_OPTIM:=https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}}"
+    : "${SCONE_RPC_POLY:=https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}}"
+fi
+
 missing=()
 [ -z "$SCONE_RPC_MAINNET" ] && missing+=("SCONE_RPC_MAINNET (or ALCHEMY_API_KEY)")
 [ -z "${ETHERSCAN_API_KEY:-}" ] && missing+=("ETHERSCAN_API_KEY")
@@ -86,11 +103,21 @@ fi
 # mode AND export the same variables below for the actual run_eval.py path.
 cat > "$SCONE_BENCH_DIR/.env" <<EOF
 SCONE_RPC_MAINNET=${SCONE_RPC_MAINNET}
+SCONE_RPC_BSC=${SCONE_RPC_BSC:-}
+SCONE_RPC_ARBI=${SCONE_RPC_ARBI:-}
+SCONE_RPC_BASE=${SCONE_RPC_BASE:-}
+SCONE_RPC_OPTIM=${SCONE_RPC_OPTIM:-}
+SCONE_RPC_POLY=${SCONE_RPC_POLY:-}
 ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 OPENAI_API_KEY=${OPENAI_API_KEY:-}
 EOF
 export SCONE_RPC_MAINNET ETHERSCAN_API_KEY
+[ -n "${SCONE_RPC_BSC:-}" ] && export SCONE_RPC_BSC
+[ -n "${SCONE_RPC_ARBI:-}" ] && export SCONE_RPC_ARBI
+[ -n "${SCONE_RPC_BASE:-}" ] && export SCONE_RPC_BASE
+[ -n "${SCONE_RPC_OPTIM:-}" ] && export SCONE_RPC_OPTIM
+[ -n "${SCONE_RPC_POLY:-}" ] && export SCONE_RPC_POLY
 [ -n "${ANTHROPIC_API_KEY:-}" ] && export ANTHROPIC_API_KEY
 [ -n "${OPENAI_API_KEY:-}" ] && export OPENAI_API_KEY
 if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
@@ -108,6 +135,14 @@ if [ ! -f "$SCONE_BENCH_DIR/$PROBLEMS" ]; then
     echo "error: no such problem-metadata file: $SCONE_BENCH_DIR/$PROBLEMS" >&2
     echo "       available: $(cd "$SCONE_BENCH_DIR" && ls problem_metadatas/)" >&2
     exit 1
+fi
+
+# flaw_verifier/foundry.toml pins solc 0.8.13 with offline = true, but the
+# image only ships svm-rs, not solc itself. Unless the model happens to run
+# `svm install 0.8.13` during its own exploration, grading fails with "can't
+# install missing solc 0.8.13 in offline mode". Pre-install it (idempotent).
+if ! grep -q '^RUN svm install 0.8.13' "$SCONE_BENCH_DIR/Dockerfile"; then
+    sed -i '/^# Vyper compilers/i RUN svm install 0.8.13\n' "$SCONE_BENCH_DIR/Dockerfile"
 fi
 
 echo "Building scone-bench image (first run: ~10 min — Rust toolchain + Foundry + heimdall) ..."

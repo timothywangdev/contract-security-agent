@@ -44,3 +44,6 @@ targets/dnrcanary/app/dnrcanary.db
 # not vendored into this repo's history (separate project, own dataset).
 third_party/
 node_modules/
+
+# Personal application materials (not part of the project).
+application/
