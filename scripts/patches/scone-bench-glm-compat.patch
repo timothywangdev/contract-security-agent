@@ -1,0 +1,96 @@
+diff --git a/runner/client.py b/runner/client.py
+index df8f46e..701fb99 100644
+--- a/runner/client.py
++++ b/runner/client.py
+@@ -75,17 +75,76 @@ class MCPClient:
+ 
+     async def get_tools(self):
+         # convert from MCP Tool to API Tool
++        # Anthropic's server-side beta tools (bash_20250124, text_editor_*) carry
++        # no client-provided input schema — the API fills them in. Non-Anthropic
++        # models reached through an Anthropic-compatible endpoint (e.g. GLM via
++        # Z.ai) don't recognize those beta types, so every bash/editor call comes
++        # back with empty input ("no command provided") and the agent can never
++        # act. For non-Claude models, emit equivalent *custom* tools with explicit
++        # schemas instead; names stay identical so execute_tool dispatch is
++        # unchanged (str_replace_based_edit_tool -> str_replace_editor maps there).
++        native_anthropic = bool(self.model and self.model.startswith("claude"))
++
+         def to_api_tool(tool: Tool) -> ToolUnionParam | BetaToolTextEditor20250429Param | dict[str, Any]:
+             if tool.name == "str_replace_editor":
+                 # Claude 3.x (Sonnet 3.7) uses text_editor_20250124, Claude 4.x uses text_editor_20250728
+-                if self.model and self.model.startswith("claude-3"):
++                if native_anthropic and self.model.startswith("claude-3"):
+                     return BetaToolTextEditor20250429Param(type="text_editor_20250124", name="str_replace_editor")
+-                else:
++                elif native_anthropic:
+                     return BetaToolTextEditor20250429Param(
+                         type="text_editor_20250728", name="str_replace_based_edit_tool"
+                     )
++                else:
++                    return ToolParam(
++                        name="str_replace_based_edit_tool",
++                        description=(
++                            "Custom editing tool for viewing, creating and editing files.\n"
++                            "* State is persistent across command calls.\n"
++                            "* The `create` command cannot be used if the path already exists as a file.\n"
++                            "* `view` shows the file with line numbers (optionally a `view_range`).\n"
++                            "* `str_replace` replaces the unique occurrence of `old_str` with `new_str`.\n"
++                            "* `insert` inserts `new_str` after line `insert_line`."
++                        ),
++                        input_schema={
++                            "type": "object",
++                            "properties": {
++                                "command": {
++                                    "type": "string",
++                                    "enum": ["view", "create", "str_replace", "insert"],
++                                    "description": "The editor command to run.",
++                                },
++                                "path": {"type": "string", "description": "Absolute path to the file or directory."},
++                                "file_text": {"type": "string", "description": "Content for the `create` command."},
++                                "old_str": {"type": "string", "description": "Text to replace for `str_replace`."},
++                                "new_str": {
++                                    "type": "string",
++                                    "description": "Replacement text for `str_replace`, or inserted text for `insert`.",
++                                },
++                                "insert_line": {"type": "integer", "description": "Line number for `insert`."},
++                                "view_range": {
++                                    "type": "array",
++                                    "items": {"type": "integer"},
++                                    "description": "Optional [start, end] line range for `view`.",
++                                },
++                            },
++                            "required": ["command", "path"],
++                        },
++                    )
+             if tool.name == "bash":
+-                return ToolBash20250124Param(type="bash_20250124", name="bash")
++                if native_anthropic:
++                    return ToolBash20250124Param(type="bash_20250124", name="bash")
++                return ToolParam(
++                    name="bash",
++                    description="Run a bash command in the container shell and return its stdout/stderr.",
++                    input_schema={
++                        "type": "object",
++                        "properties": {
++                            "command": {"type": "string", "description": "The bash command to run."},
++                            "restart": {"type": "boolean", "description": "Restart the bash session if true."},
++                        },
++                        "required": ["command"],
++                    },
++                )
+             if tool.name == "computer":
+                 if not os.environ.get("COMPUTER_WIDTH_PX") or not os.environ.get("COMPUTER_HEIGHT_PX"):
+                     raise ValueError(
+diff --git a/runner/utils.py b/runner/utils.py
+index 1c63e59..ebc58ac 100644
+--- a/runner/utils.py
++++ b/runner/utils.py
+@@ -1063,6 +1063,7 @@ async def stream_agentic_response(  # noqa: ASYNC900
+                         elif chunk.type == "content_block_start" and chunk.content_block.type == "tool_use":
+                             assert isinstance(chunk, RawContentBlockStartEvent)
+                             has_tool_call = True
++                            current_partial_json = ""  # reset per tool-use block
+                             current_tool_use = {
+                                 "id": chunk.content_block.id,
+                                 "name": chunk.content_block.name,

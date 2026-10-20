@@ -52,6 +52,28 @@ else
     fi
 fi
 
+# GLM/non-Anthropic-model compatibility patch (runner/client.py + runner/utils.py):
+#   1. client.py — emit `bash`/editor as custom tools with explicit input schemas
+#      for non-Claude models. Anthropic's server-side beta tools (bash_20250124,
+#      text_editor_*) carry no client schema; GLM via Z.ai can't fill them, so
+#      every tool call arrived empty ("no command provided") and the agent could
+#      never act. Verified against the pinned revision.
+#   2. utils.py — reset the input_json_delta buffer per tool-use block (GLM emits
+#      several tool calls per turn; the 2nd+ otherwise parsed as empty).
+# Generated against the pinned revision, so it applies cleanly; the --check guard
+# makes re-runs idempotent.
+GLM_PATCH="$REPO_ROOT/scripts/patches/scone-bench-glm-compat.patch"
+if [ -f "$GLM_PATCH" ]; then
+    if git -C "$SCONE_BENCH_DIR" apply --check "$GLM_PATCH" 2>/dev/null; then
+        git -C "$SCONE_BENCH_DIR" apply "$GLM_PATCH"
+        echo "Applied GLM-compatibility patch to vendored runner."
+    elif git -C "$SCONE_BENCH_DIR" apply --reverse --check "$GLM_PATCH" 2>/dev/null; then
+        : # already applied
+    else
+        echo "warning: $GLM_PATCH neither applies nor is already applied — vendored source may have drifted." >&2
+    fi
+fi
+
 # Pull credentials from THIS repo's root .env and write scone-bench's own
 # .env from them, so the root .env is the only file you ever touch.
 if [ -f "$REPO_ROOT/.env" ]; then
@@ -153,6 +175,7 @@ mkdir -p "$TRANSCRIPT_DIR"
 echo "Results -> $TRANSCRIPT_DIR"
 
 cd "$SCONE_BENCH_DIR/runner"
+
 # runner/pyproject.toml declares "mcp[cli]>=1.3.0" with no upper bound and no
 # checked-in lockfile. A fresh `uv run`/`uv sync` resolves that to the
 # newest mcp (observed: 2.3.0), whose CallToolResult *renamed* the
@@ -173,12 +196,20 @@ sed -i -E 's/"mcp\[cli\]>=1\.3\.0(,<2\.0\.0)?"/"mcp[cli]>=1.3.0,<2.0.0"/' pyproj
 uv lock
 uv sync
 
+# Run knobs, overridable from the environment:
+#   SCONE_BENCH_TIMES    attempts per problem (Best@N; higher lands more finds)
+#   SCONE_BENCH_PARALLEL  concurrent problem containers (each runs its own anvil
+#                         fork + agent, so raise with care re: CPU/RAM/API load)
+#   SCONE_BENCH_TIMEOUT   per-problem wall-clock minutes (default 10 cuts off
+#                         agents that are still mid-exploit)
+#   SCONE_BENCH_MAX_TOKENS max output tokens per model turn
 RUN_ARGS=(
     run_eval.py
     --problems-metadata "../$PROBLEMS"
-    --max-tokens 64000
-    --times-per-problem 1
-    --parallel-requests 1
+    --max-tokens "${SCONE_BENCH_MAX_TOKENS:-64000}"
+    --times-per-problem "${SCONE_BENCH_TIMES:-1}"
+    --parallel-requests "${SCONE_BENCH_PARALLEL:-1}"
+    --timeout "${SCONE_BENCH_TIMEOUT:-10}"
     --transcript-dir "$REPO_ROOT/$TRANSCRIPT_DIR"
 )
 [ -n "$MODEL" ] && RUN_ARGS+=(--model "$MODEL")
