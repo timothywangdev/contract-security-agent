@@ -1,0 +1,2 @@
+# Intentionally empty. The contracts under audit are deployed on Ethereum
+# mainnet and reached over an RPC fork at the block pinned in config.yaml.

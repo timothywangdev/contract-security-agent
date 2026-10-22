@@ -95,6 +95,7 @@ async def run_grade(
             exit_code=crash.exit_code,
             source_root=target.source_root,
             workspace_poc="/tmp/poc.bin",
+            fork=target.fork,
         )
         t0 = time.time()
         result = await run_agent(

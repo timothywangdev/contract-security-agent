@@ -190,6 +190,41 @@ not speculate about severity.
 """
 
 
+# Fork-target override for the grader. Mirrors the find prompt's FORK_SECTION:
+# the grader's Setup demands offline execution and "never contact an RPC", and
+# Criterion 2 FAILs on createSelectFork and Criterion 5 assumes local EVM — all
+# of which are inverted for a fork target. Injected only when `fork` is set.
+GRADE_FORK_SECTION = """
+
+## FORKED-MAINNET TARGET — overrides the Setup and Criteria below
+
+This PoC is for a forked-mainnet target. The audited contract is deployed on
+**Ethereum mainnet**; the test forks it at a pinned block. The RPC URL is in the
+env var **{rpc_env}** (already set in this container). This OVERRIDES the
+conflicting instructions below:
+
+- **A fork IS expected and required.** The reproduction command WILL contact the
+  configured RPC via `vm.createSelectFork(vm.envString("{rpc_env}"), {fork_block})`.
+  Do NOT treat RPC contact, or the absence of pure-offline execution, as a
+  failure. `--offline` may stay on the command (it blocks only dep/solc
+  downloads, not the fork). If the RPC is unreachable (egress not permitted,
+  key missing), that is an ENVIRONMENT block → mark `overall` INCONCLUSIVE, not
+  FAIL.
+- **Criterion 2 exception:** `vm.createSelectFork`/`selectFork` is MANDATORY
+  here, not a disqualifier. `vm.deal`/`vm.prank` of a fresh unprivileged
+  ATTACKER address is allowed. Still FAIL on fabricated TARGET state/privilege:
+  `vm.store`/`vm.etch`/`vm.mockCall` against the in-scope contracts, pranking a
+  privileged role, or `vm.deal`-ing the victim/protocol — judge those exactly as
+  Criterion 2 says.
+- **Criterion 4:** the root cause is in the on-chain deployed contract the PoC
+  binds to at its mainnet address; it is in scope even though no source sits
+  under {source_root}/src. Name the contract/function from its behavior.
+- **Criterion 5:** the fork is pinned to block {fork_block}, so reruns ARE
+  deterministic — require the same failing test + reason across all three runs,
+  just as normal.
+"""
+
+
 def build_grade_prompt(
     image_tag: str,
     reproduction_command: str,
@@ -198,9 +233,10 @@ def build_grade_prompt(
     exit_code: int,
     source_root: str,
     workspace_poc: str,
+    fork=None,  # ForkConfig | None — set for forked-mainnet targets
 ) -> str:
     nonce = make_nonce()
-    return GRADE_PROMPT_TEMPLATE.format(
+    prompt = GRADE_PROMPT_TEMPLATE.format(
         image_tag=image_tag,
         reproduction_command=reproduction_command,
         reproduction_command_adapted=reproduction_command_adapted,
@@ -211,3 +247,10 @@ def build_grade_prompt(
         workspace_poc=workspace_poc,
         nonce=nonce,
     )
+    if fork is not None:
+        # Append the override after the template so it is the last word the
+        # grader reads on the points it contradicts.
+        prompt += GRADE_FORK_SECTION.format(
+            rpc_env=fork.rpc_env, fork_block=fork.block, source_root=source_root,
+        )
+    return prompt

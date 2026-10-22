@@ -437,6 +437,60 @@ lockout — but the floor is lowered: a reproducing DoS is a valid submission.
 """
 
 
+# Fork-target override. A forked-mainnet target inverts the two load-bearing
+# assumptions of the default prompt — "everything is local / egress blocked" and
+# the no-cheatcodes/no-forks Exploit-Test Rules — so when `fork` is set this
+# block is injected at the very top of the task and explicitly SUPERSEDES those
+# rules. It is gated on config, so a non-fork target never sees it.
+FORK_SECTION = """
+## FORKED-MAINNET TARGET — read this FIRST (it overrides rules below)
+
+This target is NOT local source. The contracts under audit are already deployed
+on **Ethereum mainnet** and you interact with them over an RPC fork at a pinned
+block. The RPC URL is in the environment variable **{rpc_env}** (already set in
+this container — do not print it; it embeds a key). Fork block: **{fork_block}**.
+
+The following OVERRIDES the "Environment", "Exploit-Test Rules", and
+"Out of scope" sections below wherever they conflict:
+
+- **You MUST use a fork and forge-std.** Write a Foundry test that extends
+  `forge-std/Test.sol` and, in `setUp()` or the test, does
+  `vm.createSelectFork(vm.envString("{rpc_env}"), {fork_block});`. `forge-std`
+  IS vendored (`import "forge-std/Test.sol";`). This is the one case where
+  cheatcodes and forks are REQUIRED, not forbidden.
+- **Funding the attacker is allowed.** `vm.deal(attacker, N ether)` to give the
+  attacker a realistic starting balance, and deploying an attacker contract, are
+  fine. What is still forbidden: faking the TARGET's state or privilege —
+  `vm.store`/`vm.etch`/`vm.mockCall` on the in-scope contracts, pranking a
+  privileged role the attacker could not hold, or minting/moving tokens the
+  attacker could not obtain on-chain. The point is to prove the LIVE deployed
+  contracts are exploitable by an ordinary account.
+- **The target is already deployed** at its mainnet address — do NOT redeploy
+  it. Bind to it with an interface at its address. Read its real on-chain code
+  with `cast code <addr> --rpc-url "${rpc_env}"` / `cast call ...` if useful.
+- **RPC egress is expected.** Do not try to run `--offline` to block the
+  network for the fork call. You MAY keep `--offline` on the `forge test`
+  command (it only blocks dependency/solc downloads, not the fork RPC), and
+  solc is pre-installed, so `--offline` is safe and recommended.
+- **Determinism via the pinned block.** Because the fork is pinned to block
+  {fork_block}, reruns are deterministic — the 3/3 requirement still applies.
+- **Reproduction command — select by path.** Use
+  `forge test --offline --json --match-path 'test/audit/<File>.t.sol' --match-test '<testName>'`.
+  This Foundry version matches `--match-test` against the full signature
+  `<testName>()`, so an end-anchored `^<testName>$` pattern selects NOTHING; if a
+  run prints "No tests found in project!", drop the trailing `$` (an unanchored
+  substring, or `--match-path` alone, is reliable). Before emitting tags, confirm
+  the command selects exactly one test and prints a JSON suite map (not the
+  "No tests found" line), with a non-zero `forge` exit code.
+
+Everything else (the quality tiers, the `test_Exploit_<Class>_<What>` naming,
+the `VIOLATION:`-prefixed safety assertion that the exploit makes FAIL, the
+output tags) applies unchanged. Your invariant should assert the attacker
+cannot profit (e.g. `assertLt(attackerProfit, 0.1 ether, "VIOLATION: ...")`),
+which the working exploit violates.
+"""
+
+
 def build_find_prompt(
     github_url: str,
     commit: str,
@@ -447,10 +501,17 @@ def build_find_prompt(
     found_bugs_path: str | None = None,
     accept_dos: bool = False,
     reattack_harness: str | None = None,
+    fork=None,  # ForkConfig | None — set for forked-mainnet targets
 ) -> str:
     focus_section = ""
     if focus_area:
         focus_section = FOCUS_AREA_SECTION.format(focus_area=focus_area)
+    if fork is not None:
+        # Prepend the fork override to the focus section so it lands near the top
+        # of the task, ahead of the (overridden) local/offline instructions.
+        focus_section = FORK_SECTION.format(
+            rpc_env=fork.rpc_env, fork_block=fork.block,
+        ) + focus_section
 
     bugs_section = ""
     if known_bugs:

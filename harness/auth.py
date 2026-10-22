@@ -331,12 +331,26 @@ def resolve_auth_env() -> dict[str, str] | None:
         return _with_small_fast_model(env)
 
     if v := os.environ.get("ANTHROPIC_API_KEY"):
-        return _with_usage_marker(
-            _with_small_fast_model({"ANTHROPIC_API_KEY": v}))
+        return _with_base_url(_with_usage_marker(
+            _with_small_fast_model({"ANTHROPIC_API_KEY": v})))
     if v := os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
-        return _with_usage_marker(
-            _with_small_fast_model({"CLAUDE_CODE_OAUTH_TOKEN": v}))
+        return _with_base_url(_with_usage_marker(
+            _with_small_fast_model({"CLAUDE_CODE_OAUTH_TOKEN": v})))
     return None
+
+
+def _with_base_url(env: dict[str, str]) -> dict[str, str]:
+    """Forward ANTHROPIC_BASE_URL into the agent container for first-party auth.
+
+    The in-container ``claude -p`` otherwise defaults to api.anthropic.com, so a
+    non-Anthropic endpoint that speaks the Anthropic API (e.g. a GLM Coding Plan
+    base URL) only works if the base URL crosses the boundary alongside the key.
+    First-party only — Bedrock/Vertex derive their endpoints from the provider.
+    The host is whatever the operator set; the sandbox egress allowlist still
+    governs what the container can actually reach."""
+    if v := os.environ.get("ANTHROPIC_BASE_URL"):
+        env["ANTHROPIC_BASE_URL"] = v
+    return env
 
 
 def warn_bedrock_model(model: str | None) -> None:
@@ -451,17 +465,46 @@ def required_egress_hosts() -> list[str]:
     return ["api.anthropic.com:443"]
 
 
+def fork_egress_hosts(target_dir: str | None) -> list[str]:
+    """Extra host:port entries a FORK target needs on the allowlist, or [].
+
+    Scoped to the one target named on the command line: a non-fork target (no
+    ``fork:`` block) returns [], so the provider allowlist is never widened for
+    it. Returns [] on anything unresolvable (no dir, bad config) — the caller's
+    provider-host preflight still runs; a genuinely missing fork host surfaces
+    as the first denied agent request, not a crash in the preflight."""
+    if not target_dir:
+        return []
+    try:
+        from .config import TargetConfig
+        cfg = TargetConfig.load(target_dir)
+    except Exception:
+        return []
+    return list(cfg.fork.egress_hosts) if cfg.fork else []
+
+
+def egress_allow_for_target(target_dir: str) -> str:
+    """CSV the operator feeds to ``VP_EGRESS_ALLOW`` before ``setup_sandbox.sh``
+    for a fork target: the provider host(s) plus that target's fork hosts, and
+    nothing else. Keeps the relaxation scoped to exactly the hosts one target
+    declares instead of opening the proxy globally."""
+    return ",".join(required_egress_hosts() + fork_egress_hosts(target_dir))
+
+
 def _host_allowed(target: str, allow: set[str]) -> bool:
     """Mirror of scripts/egress_proxy.py:_allowed — keep in sync."""
     t = target.lower()
     return any(t == e or (e.startswith("*.") and t.endswith(e[1:])) for e in allow)
 
 
-def check_egress_satisfied(proxy_allow_csv: str) -> None:
+def check_egress_satisfied(proxy_allow_csv: str, extra_required: list[str] | None = None) -> None:
     """Preflight for vp-sandboxed: exit non-zero if any required host is not
-    covered by the running proxy's allowlist."""
+    covered by the running proxy's allowlist. ``extra_required`` carries a fork
+    target's RPC host(s) so launching a fork target against a proxy that can't
+    reach the RPC fails here, with a pointer to re-run setup, rather than as an
+    opaque mid-run egress denial."""
     allow = {h.strip().lower() for h in proxy_allow_csv.split(",") if h.strip()}
-    needed = required_egress_hosts()
+    needed = required_egress_hosts() + list(extra_required or [])
     missing = [h for h in needed if not _host_allowed(h, allow)]
     if missing:
         sys.exit(

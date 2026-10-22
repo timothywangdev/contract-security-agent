@@ -11,10 +11,49 @@ Adding a new target = new dir, zero pipeline code changes.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+
+# host:port, shape-only — guards the egress allowlist against injection the
+# same way auth._AWS_REGION_RE does (no commas/whitespace/scheme/path that could
+# smuggle a second allowlist entry). A bare hostname (letters/digits/dot/dash)
+# plus a numeric port.
+_HOST_PORT_RE = re.compile(r"[A-Za-z0-9.-]+:[0-9]{1,5}")
+
+
+@dataclass(frozen=True)
+class ForkConfig:
+    """Fork-target settings (optional `fork:` block in config.yaml).
+
+    Presence of this on a TargetConfig is the single switch that makes the
+    pipeline treat a target as a forked-mainnet target: find/grade get the RPC
+    env injected and the find/grade prompts switch to their fork-aware path.
+    Everything here is per-target, so the relaxation it implies (an RPC host on
+    the egress allowlist, an RPC URL in the agent container) never touches a
+    non-fork target.
+    """
+    rpc_env: str              # env var name set in the find+grade containers (e.g. ETH_RPC_URL)
+    rpc_url_template: str      # ${VAR} expanded from the orchestrator host env at launch
+    block: int                 # fork block number, threaded into the prompts
+    egress_hosts: list[str] = field(default_factory=list)  # extra host:port the agent/grader needs
+
+    @classmethod
+    def parse(cls, raw: dict) -> ForkConfig:
+        try:
+            rpc_env = str(raw["rpc_env"])
+            rpc_url_template = str(raw["rpc_url_template"])
+            block = int(raw["block"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError(f"invalid fork: block — need rpc_env, rpc_url_template, block ({e})")
+        hosts = [str(h) for h in (raw.get("egress_hosts") or [])]
+        bad = [h for h in hosts if not _HOST_PORT_RE.fullmatch(h)]
+        if bad:
+            raise ValueError(f"invalid fork.egress_hosts entries (want host:port): {bad}")
+        return cls(rpc_env=rpc_env, rpc_url_template=rpc_url_template, block=block, egress_hosts=hosts)
 
 
 @dataclass(frozen=True)
@@ -35,6 +74,7 @@ class TargetConfig:
     shm_size: str | None = None       # docker --shm-size
     memory_limit: str = "4g"          # docker --memory
     reattack_harness: str | None = None  # in-image script that runs every /poc/* and exits 1 on crash
+    fork: ForkConfig | None = None    # set for forked-mainnet targets (optional `fork:` block)
 
     @classmethod
     def load(cls, target_dir: str | Path) -> TargetConfig:
@@ -70,4 +110,5 @@ class TargetConfig:
             shm_size=cfg.get("shm_size"),
             memory_limit=cfg.get("memory_limit", "4g"),
             reattack_harness=cfg.get("reattack_harness"),
+            fork=ForkConfig.parse(cfg["fork"]) if cfg.get("fork") else None,
         )

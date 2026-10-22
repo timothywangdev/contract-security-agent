@@ -46,9 +46,17 @@ export VULN_PIPELINE_EGRESS_PROXY="http://${proxy_ip}:3128"
 
 PROXY_ALLOW=$(docker inspect "$PROXY_NAME" --format \
     '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^VP_EGRESS_ALLOW=//p')
+# Pass the whole pipeline command line too: for a fork target (run/recon), the
+# preflight also requires that target's declared RPC host(s), so launching one
+# against a proxy that can't reach the RPC fails here, not mid-run. Non-fork
+# targets add nothing.
 "$REPO_ROOT/.venv/bin/python3" -c \
-    'import sys; from harness.auth import check_egress_satisfied; check_egress_satisfied(sys.argv[1])' \
-    "$PROXY_ALLOW" \
-    || { echo "  → re-run scripts/setup_sandbox.sh with current provider env set" >&2; exit 1; }
+    'import sys
+from harness.auth import check_egress_satisfied, fork_egress_hosts
+allow, args = sys.argv[1], sys.argv[2:]
+tgt = args[1] if len(args) >= 2 and args[0] in ("run", "recon") else None
+check_egress_satisfied(allow, fork_egress_hosts(tgt))' \
+    "$PROXY_ALLOW" "$@" \
+    || { echo "  → re-run scripts/setup_sandbox.sh (for a fork target, include its RPC host in VP_EGRESS_ALLOW: see targets/<t>/README.md)" >&2; exit 1; }
 
 exec "$REPO_ROOT/.venv/bin/$BIN" "$@"

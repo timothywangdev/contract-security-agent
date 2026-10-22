@@ -968,6 +968,29 @@ def main() -> int:
     return 1
 
 
+def _inject_fork_env(target: TargetConfig, agent_env: dict[str, str]) -> None:
+    """For a fork target, build the RPC URL from the orchestrator host env and
+    set it on BOTH the agent env (so sandbox.container_env forwards it into the
+    find AND grade containers) and this process's env (so docker_ops.run passes
+    it as ``-e KEY`` with the value read from our env, keeping the embedded API
+    key out of host argv / ``ps``). No-op for non-fork targets, so a target
+    without a ``fork:`` block never receives an RPC URL."""
+    fork = target.fork
+    if not fork:
+        return
+    import string
+    try:
+        url = string.Template(fork.rpc_url_template).substitute(os.environ)
+    except (KeyError, ValueError) as e:
+        raise SystemExit(
+            f"error: fork target {target.name}: cannot build {fork.rpc_env} from "
+            f"rpc_url_template {fork.rpc_url_template!r} — missing/invalid host env "
+            f"var {e}. Export it (e.g. ALCHEMY_API_KEY from .env)."
+        )
+    os.environ[fork.rpc_env] = url
+    agent_env[fork.rpc_env] = url
+
+
 def _cmd_run(args) -> int:
     # Resolve target
     try:
@@ -983,6 +1006,8 @@ def _cmd_run(args) -> int:
     if agent_env is None:
         print(NO_AUTH_MSG, file=sys.stderr)
         return 1
+    # Fork target: route ETH_RPC_URL (built from the host env) into find+grade.
+    _inject_fork_env(target, agent_env)
 
     # Model: required, via --model or env
     if not args.model:
@@ -996,6 +1021,9 @@ def _cmd_run(args) -> int:
     print(f"  model:       {args.model}")
     print(f"  binary:      {target.binary_path or '(none — source-based target)'}")
     print(f"  source_root: {target.source_root}")
+    if target.fork:
+        print(f"  fork:        mainnet@{target.fork.block} "
+              f"(RPC in container as {target.fork.rpc_env})")
     print(f"  max_turns:   {args.max_turns}")
     print(f"  runs:        {args.runs}{' (parallel)' if args.parallel else ''}")
     print(f"  find_only:   {args.find_only}")

@@ -51,7 +51,10 @@ applies to this fork.
   smart-contract vulnerabilities (reentrancy, access control,
   accounting/share-price manipulation) — see `docs/product-plan/` for the
   retarget rationale. Needs Docker + a gVisor sandbox, since it executes
-  target code.
+  target code. It can audit **local source** (e.g. `targets/solidity-canary/`)
+  or a **live-deployed contract on a mainnet fork** (e.g.
+  `targets/scone-uerii/`) — see
+  [Auditing live-deployed contracts](#auditing-live-deployed-contracts-fork-targets).
 
 > ⚠️ **Security:** `/quickstart`, `/threat-model`, `/vuln-scan`, and `/triage`
 > only read and write files. Running `/patch` on static findings (`TRIAGE.json`
@@ -347,6 +350,44 @@ This repo also ships an unrelated detection & response track (`/dnr-hunt`,
 logs, rather than auditing contracts before deployment. Not covered here
 since it isn't part of a smart-contract audit workflow; see
 [docs/detection-response.md](docs/detection-response.md) if you want it.
+
+## Auditing live-deployed contracts (fork targets)
+
+Most targets audit **local source**. A **fork target** instead points the
+pipeline at a contract that is *already deployed* on a mainnet, audited against
+a live RPC fork pinned to a historical block — the same shape as a real
+incident post-mortem. Our own find-agent and grade-agent drive the whole loop
+(our prompts, our sandbox, our verdict); nothing is outsourced to a third-party
+runner.
+
+The shipped example is [`targets/scone-uerii/`](targets/scone-uerii/) — the
+UERII token's permissionless `mint()` drained via a Uniswap V3 pool at block
+15767837 (~1.855 ETH). See its README for the full walkthrough.
+
+A target becomes a fork target purely by adding a `fork:` block to its
+`config.yaml` — no pipeline code changes:
+
+```yaml
+fork:
+  rpc_env: ETH_RPC_URL                 # injected into the find + grade containers
+  rpc_url_template: "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  block: 15767837                      # pinned fork block (deterministic reruns)
+  egress_hosts:                        # the one RPC host the agent/grader may reach
+    - eth-mainnet.g.alchemy.com:443
+```
+
+The relaxation this implies is **scoped to that one target**: the RPC URL is
+built from your host env at launch (the key never lives in the image or config,
+and is passed via `-e` so it stays out of host `ps`), and the RPC host is added
+to the sandbox egress allowlist only for a run of that target — a non-fork
+target still reaches nothing but the model API. For a sandboxed run, include the
+host when you start the proxy (`VP_EGRESS_ALLOW`, see the target's README), then
+launch via `bin/vp-sandboxed vuln-pipeline run targets/scone-uerii --model <m>`.
+
+Run `scripts/run-scone-bench.sh` instead if you want to reproduce Anthropic's
+[scone-bench](docs/scone-bench.md) benchmark with *its own* runner — that is a
+separate baseline, not this pipeline. Fork targets are how you put *this*
+pipeline on the same kind of task.
 
 ## Looking Forward
 

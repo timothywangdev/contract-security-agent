@@ -57,6 +57,7 @@ async def run_find(
             found_bugs_path="/tmp/found_bugs.jsonl" if found_bugs_path else None,
             accept_dos=accept_dos,
             reattack_harness=target.reattack_harness,
+            fork=target.fork,
         )
         t0 = time.time()
         result = await run_agent(
