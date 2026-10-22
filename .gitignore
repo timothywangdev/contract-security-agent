@@ -47,3 +47,8 @@ node_modules/
 
 # Personal application materials (not part of the project).
 application/
+
+# Generated scone-bench fork targets (reproducible via scripts/gen-scone-targets.py);
+# the canonical hand-built example (scone-uerii) stays tracked.
+targets/scone-*/
+!targets/scone-uerii/
