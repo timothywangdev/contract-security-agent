@@ -1,12 +1,17 @@
 # Contract Security Agent
 
-A fork of Anthropic's [Defending Code Reference Harness](https://github.com/anthropics/defending-code-reference-harness)
-— a reference implementation for autonomous vulnerability discovery and
-remediation with Claude — retargeted (via its own `/customize` skill) from
-C/C++ memory-safety bugs to **Solidity/Foundry smart-contract
-vulnerabilities**: reentrancy, access control, and accounting/share-price
-manipulation. See `docs/product-plan/` for the retarget's planning docs and
-rationale, and `CLAUDE.md` for what changed vs. upstream.
+An autonomous pipeline for finding and verifying **Solidity/Foundry
+smart-contract vulnerabilities** — reentrancy, access control, and
+accounting/share-price manipulation. Its agents read a contract, write a
+working exploit test, and independently verify it in a fresh sandbox, so the
+output is an execution-proven finding, not a guess. It can audit local source
+or a contract already deployed on a live mainnet fork.
+
+Built by retargeting the open-source
+[Defending Code Reference Harness](https://github.com/anthropics/defending-code-reference-harness)
+(Apache-2.0) from C/C++ memory-safety bugs to smart contracts. See
+`docs/product-plan/` for the design rationale and `CLAUDE.md` for the
+architecture.
 
 ## Proven results: autonomous end-to-end exploits on real incidents
 
@@ -30,31 +35,6 @@ heavy lifting. Reproduce them with
 + `vuln-pipeline run`. See [fork targets](#auditing-live-deployed-contracts-fork-targets)
 to point the same loop at any of the 417 benchmark incidents, or at your own
 deployed contracts.
-
-The rest of this README is upstream's own documentation, with examples
-updated to point at this fork's `solidity-canary` target instead of its
-original C/C++ demo targets. For a write up of the methodology this fork
-builds on, see the [accompanying blog post](https://claude.com/blog/using-llms-to-secure-source-code)
-(also available in [`blog-post.md`](docs/blog-post.md)). For a lightweight SDK-only 
-walkthrough of the same recon → find → triage → report → patch loop, see the 
-[companion cookbook](https://platform.claude.com/cookbook/claude-agent-sdk-06-the-vulnerability-detection-agent).
-
-Upstream is not maintained and is not accepting contributions; the same
-applies to this fork.
-
-> 🔒 **Want a managed option?** Anthropic offers
-> [Claude Security](https://claude.com/product/claude-security), a hosted product
-> that finds and fixes vulnerabilities in your source code across multiple
-> projects. Claude Security scans your repository for vulnerabilities,
-> applies a multi-stage verification pipeline to reduce false positives, and
-> lets you manage findings through their lifecycle: triage, fix validation,
-> and rapid fix generation.
->
-> This repository is an open-source reference implementation based on general
-> best practices for finding vulnerabilities using Claude. You can use it to
-> build your own vulnerability finding pipeline, customize the logic, and it
-> can be used with whatever access you have to Claude APIs (including
-> Bedrock, Vertex, or Azure).
 
 ## Contents
 
@@ -134,27 +114,22 @@ claude
 - [**Troubleshooting**](docs/troubleshooting.md) · Duplicates, rate limits, subagent model pinning
 - [**Best practices**](docs/best-practices.md) · Field-tested principles: verification, severity, iteration, large codebases
 - [**Prompting**](docs/prompting.md) · Prompting the model for defensive security tasks
-- [**Customize**](docs/customizing.md) · How this fork itself was retargeted to Solidity, and how to port it again
-- [**scone-bench**](docs/scone-bench.md) · Reproduce Anthropic's real-world smart-contract benchmark in one command (`scripts/run-scone-bench.sh`) — a validation signal, not a daily-use tool
-- [**Safeguards**](https://support.claude.com/en/articles/14604842-real-time-cyber-safeguards-on-claude) · Block for dangerous cyber work
+- [**Customize**](docs/customizing.md) · How the pipeline was retargeted to Solidity, and how to port it again
+- [**scone-bench**](docs/scone-bench.md) · Reproduce the smart-contract exploit benchmark in one command (`scripts/run-scone-bench.sh`) — a validation signal, not a daily-use tool
 
-Not relevant to a smart-contract audit, but still in this repo (upstream
-content, unmodified): [docs/detection-response.md](docs/detection-response.md)
-(an unrelated log-hunting/incident-response track, `/dnr-hunt` + `/dnr-respond`),
+Not relevant to a smart-contract audit, but still in this repo:
+[docs/detection-response.md](docs/detection-response.md) (an unrelated
+log-hunting/incident-response track, `/dnr-hunt` + `/dnr-respond`) and
 [docs/other-use-cases.md](docs/other-use-cases.md) (binary analysis, embedded,
-bug chains), and [docs/blog-post.md](docs/blog-post.md) (the original
-C/C++-oriented methodology write-up this fork's workflow is based on).
+bug chains).
 
 ---
 
 ## Ramp Up
 
-The most successful security teams we've partnered with are those 
-that have gotten hands-on the fastest. Though it's tempting to 
-spend months designing the perfect pipeline, we recommend starting
-small on Day 1 and building from there as learnings come. The
-steps below follow that pattern and set an ambitious (but reasonable)
-pace based on what we've seen.
+The fastest way to get value is to get hands-on quickly rather than spending
+months designing the perfect pipeline. The steps below start small on Day 1
+and build from there, at an ambitious but reasonable pace.
 
 |                                                                                     |              |                                                              |
 |-------------------------------------------------------------------------------------|--------------|--------------------------------------------------------------|
@@ -291,7 +266,7 @@ target is just a directory with a `Dockerfile` (Foundry + Slither + Halmos —
 copy `targets/solidity-canary/Dockerfile` as a starting point) and a
 `config.yaml` (`source_root`, `build_command: forge build --offline`,
 `test_command: forge test --offline`, `attack_surface`). No `binary_path`
-needed — that field is only for the upstream C/C++ shape. See
+needed — that field is only for the original C/C++ shape. See
 `targets/README.md`'s Solidity section for the exact schema. No pipeline
 code changes either way.
 
@@ -360,8 +335,8 @@ Autonomous triage and patching are still open issues, and this reference
 harness doesn't fully solve them. The verification strategies in `/patch`
 help raise the bar, but severity and prioritization are ultimately
 judgments about your environment, and verified patches are not always
-upstreamable. Many partners have reported these steps as their current
-bottlenecks, and you should budget real engineering time for them.
+safe to upstream. These steps are a common bottleneck — budget real
+engineering time for them.
 
 For more details, see [docs/triage.md](docs/triage.md) and 
 [docs/patching.md](docs/patching.md).
@@ -407,15 +382,14 @@ target still reaches nothing but the model API. For a sandboxed run, include the
 host when you start the proxy (`VP_EGRESS_ALLOW`, see the target's README), then
 launch via `bin/vp-sandboxed vuln-pipeline run targets/scone-uerii --model <m>`.
 
-Run `scripts/run-scone-bench.sh` instead if you want to reproduce Anthropic's
+Run `scripts/run-scone-bench.sh` instead if you want to reproduce the
 [scone-bench](docs/scone-bench.md) benchmark with *its own* runner — that is a
 separate baseline, not this pipeline. Fork targets are how you put *this*
 pipeline on the same kind of task.
 
 ## Looking Forward
 
-After the initial ramp up, the teams we've worked with have tended to invest in a
-few directions:
+After the initial ramp up, common next directions:
 
 1. Reviewing all their internal repos and key open-source dependencies,
 ranking which are the most important to scan (e.g., based on their exposure, 
